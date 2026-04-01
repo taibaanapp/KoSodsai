@@ -66,9 +66,11 @@ async function startServer() {
   app.post("/api/ai/process", async (req, res) => {
     const { message } = req.body;
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-      const result = await model.generateContent(message);
-      res.json({ result: result.response.text() });
+      const response = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: message }] }],
+      });
+      res.json({ result: response.text });
     } catch (error) {
       res.status(500).json({ error: "AI processing failed" });
     }
@@ -106,7 +108,6 @@ async function handleEvent(event: any) {
   // Simple command parsing or AI processing
   if (userMessage.includes("บันทึก")) {
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
       const prompt = `
         คุณคือผู้ช่วยจัดการฟาร์มวัว "โคสดใส" 
         ผู้ใช้ส่งข้อความมาว่า: "${userMessage}"
@@ -119,8 +120,11 @@ async function handleEvent(event: any) {
         }
         ถ้าสกัดไม่ได้ ให้ตอบเป็น JSON ที่มีฟิลด์ "error": "ข้อความแนะนำการใช้งาน"
       `;
-      const result = await model.generateContent(prompt);
-      const aiResponse = result.response.text();
+      const response = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: prompt }] }],
+      });
+      const aiResponse = response.text;
       
       try {
         // Find JSON in response (Gemini might wrap it in markdown)
