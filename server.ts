@@ -39,6 +39,17 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 8080;
 
   app.use(cors());
+
+  // LINE Webhook (MUST be before express.json())
+  app.post("/api/webhook", line.middleware(lineConfig), (req, res) => {
+    Promise.all(req.body.events.map(handleEvent))
+      .then((result) => res.json(result))
+      .catch((err) => {
+        console.error("Webhook Error:", err);
+        res.status(500).end();
+      });
+  });
+
   app.use(express.json());
 
   // Root route for health check
@@ -63,16 +74,6 @@ async function startServer() {
 
     const updatedUser = db.prepare("SELECT * FROM users WHERE userId = ?").get(userId);
     res.json(updatedUser);
-  });
-
-  // LINE Webhook
-  app.post("/api/webhook", line.middleware(lineConfig), (req, res) => {
-    Promise.all(req.body.events.map(handleEvent))
-      .then((result) => res.json(result))
-      .catch((err) => {
-        console.error("Webhook Error:", err);
-        res.status(500).end();
-      });
   });
 
   // API routes
