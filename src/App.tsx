@@ -256,8 +256,9 @@ export default function App() {
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center p-4 font-sans pb-24">
-      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl shadow-orange-100/50 border border-gray-100 overflow-hidden">
+    <div className="h-screen w-full bg-gray-50 flex flex-col items-center overflow-hidden font-sans relative">
+      <div className="flex-1 w-full overflow-y-auto p-4 pb-32 flex flex-col items-center overscroll-none">
+        <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl shadow-orange-100/50 border border-gray-100 overflow-hidden">
         {/* Header */}
         <div className="bg-orange-500 p-6 text-white text-center relative">
           <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-2 shadow-lg">
@@ -285,18 +286,18 @@ export default function App() {
               {activeTab === 'dashboard' && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-green-50 p-4 rounded-3xl border border-green-100">
-                      <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1">รายรับรวม</p>
-                      <p className="text-xl font-black text-green-700">฿{totalIncome.toLocaleString()}</p>
+                    <div className="bg-green-50 p-4 rounded-3xl border border-green-100 overflow-hidden">
+                      <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1 truncate">รายรับรวม</p>
+                      <p className="text-lg sm:text-xl font-black text-green-700 truncate">฿{totalIncome.toLocaleString()}</p>
                     </div>
-                    <div className="bg-red-50 p-4 rounded-3xl border border-red-100">
-                      <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-1">รายจ่ายรวม</p>
-                      <p className="text-xl font-black text-red-700">฿{totalExpense.toLocaleString()}</p>
+                    <div className="bg-red-50 p-4 rounded-3xl border border-red-100 overflow-hidden">
+                      <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-1 truncate">รายจ่ายรวม</p>
+                      <p className="text-lg sm:text-xl font-black text-red-700 truncate">฿{totalExpense.toLocaleString()}</p>
                     </div>
                   </div>
-                  <div className="bg-orange-50 p-6 rounded-3xl border border-orange-100 text-center">
-                    <p className="text-xs font-bold text-orange-600 uppercase tracking-widest mb-1">กำไรสุทธิ</p>
-                    <p className="text-3xl font-black text-orange-700">฿{(totalIncome - totalExpense).toLocaleString()}</p>
+                  <div className="bg-orange-50 p-6 rounded-3xl border border-orange-100 text-center overflow-hidden">
+                    <p className="text-xs font-bold text-orange-600 uppercase tracking-widest mb-1 truncate">กำไรสุทธิ</p>
+                    <p className="text-2xl sm:text-3xl font-black text-orange-700 truncate">฿{(totalIncome - totalExpense).toLocaleString()}</p>
                   </div>
 
                   {/* AI Usage Card */}
@@ -329,7 +330,7 @@ export default function App() {
               {activeTab === 'transactions' && (
                 <div className="space-y-4">
                   <h3 className="text-sm font-black flex items-center gap-2"><ListOrdered size={18} className="text-orange-500" /> ประวัติรายการ</h3>
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                  <div className="space-y-2 pr-1">
                     {transactions.length === 0 ? <p className="text-center text-gray-400 text-xs py-8">ยังไม่มีรายการบันทึก</p> : 
                       transactions.map(t => (
                         <div key={t.id} className="p-3 bg-gray-50 rounded-2xl border border-gray-100 flex justify-between items-center">
@@ -410,11 +411,12 @@ export default function App() {
           )}
         </div>
       </div>
+    </div>
 
       {/* Edit Transaction Modal */}
       {editingTransaction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] overflow-y-auto max-h-[90vh] shadow-2xl animate-in fade-in zoom-in duration-200">
             <div className={`p-6 text-white text-center ${editingTransaction.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}>
               <h3 className="text-xl font-black">แก้ไขรายการ</h3>
               <p className="text-xs opacity-80 mt-1">{editingTransaction.type === 'income' ? 'รายรับ' : 'รายจ่าย'}</p>
