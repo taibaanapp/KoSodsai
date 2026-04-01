@@ -95,11 +95,11 @@ try {
   console.error("Error loading keywords.json", err);
 }
 
-// Setup Fuse.js for fuzzy matching
-const allKeywords = masterData.categories.flatMap((cat: any) => 
-  cat.keywords.map((kw: string) => ({ word: kw, categoryId: cat.id, type: cat.type, label: cat.label }))
-);
-const fuse = new Fuse(allKeywords, { keys: ["word"], threshold: 0.4 });
+// Setup Fuse.js for fuzzy matching (No longer used in local parsing, but kept for reference if needed)
+// const allKeywords = masterData.categories.flatMap((cat: any) => 
+//   cat.keywords.map((kw: string) => ({ word: kw, categoryId: cat.id, type: cat.type, label: cat.label }))
+// );
+// const fuse = new Fuse(allKeywords, { keys: ["word"], threshold: 0.4 });
 
 async function parseWithAI(text: string, userId: string) {
   const userCows = db.prepare("SELECT name FROM cows WHERE userId = ?").all(userId) as { name: string }[];
@@ -152,29 +152,63 @@ function parseMessageLocal(text: string, userId: string) {
     note: text,
   };
 
+  // 1. Find Amount
   const amountMatch = text.match(/(\d+([.,]\d+)?)/);
   if (amountMatch) result.amount = parseFloat(amountMatch[0].replace(",", ""));
 
-  const words = text.split(/\s+|ให้|กับ|ค่า|ของ/);
+  // 2. Find Category (Priority: Specific > General)
+  const matches: any[] = [];
+  for (const cat of masterData.categories) {
+    for (const kw of cat.keywords) {
+      if (text.includes(kw)) {
+        matches.push({ type: cat.type, label: cat.label, keyword: kw, categoryId: cat.id });
+      }
+    }
+  }
   
-  for (const word of words) {
-    if (!word || word.length < 2) continue;
-    const matches = fuse.search(word);
-    if (matches.length > 0) {
-      const bestMatch = matches[0].item as any;
-      result.type = bestMatch.type;
-      result.category = bestMatch.label;
-      break;
+  // Check synonyms
+  if (masterData.synonyms) {
+    for (const [mainKw, syns] of Object.entries(masterData.synonyms)) {
+      for (const syn of (syns as string[])) {
+        if (text.includes(syn)) {
+          const cat = masterData.categories.find((c: any) => c.keywords.includes(mainKw));
+          if (cat) {
+            matches.push({ type: cat.type, label: cat.label, keyword: syn, categoryId: cat.id });
+          }
+        }
+      }
     }
   }
 
+  if (matches.length > 0) {
+    // Sort: Specific categories first, then longer keywords
+    matches.sort((a, b) => {
+      const aIsGeneral = a.categoryId === 'expense_transactions' || a.categoryId === 'income_transactions';
+      const bIsGeneral = b.categoryId === 'expense_transactions' || b.categoryId === 'income_transactions';
+      if (aIsGeneral && !bIsGeneral) return 1;
+      if (!aIsGeneral && bIsGeneral) return -1;
+      return b.keyword.length - a.keyword.length;
+    });
+    
+    result.type = matches[0].type;
+    result.category = matches[0].label;
+  } else if (result.amount > 0) {
+    // If we have an amount but no specific category, assume expense if "จ่าย" or "ซื้อ" is present
+    if (text.includes("จ่าย") || text.includes("ซื้อ") || text.includes("โอน")) {
+      result.type = "expense";
+      result.category = "รายจ่ายทั่วไป";
+    } else if (text.includes("รับ") || text.includes("ขาย") || text.includes("ได้เงิน")) {
+      result.type = "income";
+      result.category = "รายรับทั่วไป";
+    }
+  }
+
+  // 3. Find Cow Name
   const userCows = db.prepare("SELECT name FROM cows WHERE userId = ?").all(userId) as { name: string }[];
   if (userCows.length > 0) {
-    const userCowFuse = new Fuse(userCows.map(c => c.name), { threshold: 0.3 });
-    for (const word of words) {
-      const matches = userCowFuse.search(word);
-      if (matches.length > 0) {
-        result.cowName = matches[0].item;
+    for (const cow of userCows) {
+      if (text.includes(cow.name)) {
+        result.cowName = cow.name;
         break;
       }
     }
@@ -373,10 +407,13 @@ async function handleEvent(event: any) {
   // Stage 1 & 2: Try Local first
   const localParsed = parseMessageLocal(userMessage, userId);
   
+  // If local parsing found an amount AND a category, we can trust it
+  const localSuccess = localParsed.type !== "unknown" && localParsed.amount > 0;
+  
   // If local parsing is too simple or message looks complex (contains multiple numbers or long text)
-  const isComplex = (userMessage.match(/\d+/g) || []).length > 1 || userMessage.length > 20;
+  const isComplex = (userMessage.match(/\d+/g) || []).length > 1 || userMessage.length > 50;
 
-  if (isComplex || localParsed.type === "unknown") {
+  if (!localSuccess && (isComplex || localParsed.type === "unknown")) {
     // Stage 3: AI Inference
     const aiResult = await parseWithAI(userMessage, userId);
     transactions = aiResult.transactions;
