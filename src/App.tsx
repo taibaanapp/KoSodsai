@@ -49,6 +49,7 @@ export default function App() {
   const [farmInfo, setFarmInfo] = useState<FarmInfo>({ farmName: '', ownerName: '', location: '', contact: '' });
   const [notes, setNotes] = useState<Note[]>([]);
   const [aiUsage, setAiUsage] = useState<number>(0);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
   const [newCowName, setNewCowName] = useState('');
   const [newNote, setNewNote] = useState({ title: '', content: '' });
@@ -107,6 +108,28 @@ export default function App() {
             const userData = await response.json();
             setProfile(userData);
             await fetchData(lineProfile.userId);
+
+            // Handle URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const tid = urlParams.get('tid');
+            const tab = urlParams.get('tab');
+
+            if (tab === 'transactions') {
+              setActiveTab('transactions');
+            }
+
+            if (tid) {
+              // Fetch transactions first to find the one to edit
+              const transRes = await fetch(`/api/transactions?userId=${lineProfile.userId}`);
+              if (transRes.ok) {
+                const allTrans: Transaction[] = await transRes.ok ? await transRes.json() : [];
+                const toEdit = allTrans.find(t => t.id === parseInt(tid));
+                if (toEdit) {
+                  setEditingTransaction(toEdit);
+                  setActiveTab('transactions');
+                }
+              }
+            }
           } else {
             setError("Failed to sync user data with server.");
           }
@@ -152,7 +175,7 @@ export default function App() {
   const handleDeleteTransaction = async (id: number) => {
     if (!profile) return;
     try {
-      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/transactions/${id}?userId=${profile.userId}`, { method: 'DELETE' });
       if (res.ok) await fetchData(profile.userId);
     } catch (err) {
       console.error("Error deleting transaction:", err);
@@ -197,6 +220,23 @@ export default function App() {
       if (res.ok) await fetchData(profile.userId);
     } catch (err) {
       console.error("Error deleting note:", err);
+    }
+  };
+
+  const handleUpdateTransaction = async () => {
+    if (!editingTransaction || !profile) return;
+    try {
+      const res = await fetch('/api/transactions/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...editingTransaction, userId: profile.userId })
+      });
+      if (res.ok) {
+        setEditingTransaction(null);
+        await fetchData(profile.userId);
+      }
+    } catch (err) {
+      console.error("Error updating transaction:", err);
     }
   };
 
@@ -293,7 +333,7 @@ export default function App() {
                     {transactions.length === 0 ? <p className="text-center text-gray-400 text-xs py-8">ยังไม่มีรายการบันทึก</p> : 
                       transactions.map(t => (
                         <div key={t.id} className="p-3 bg-gray-50 rounded-2xl border border-gray-100 flex justify-between items-center">
-                          <div>
+                          <div onClick={() => setEditingTransaction(t)} className="flex-1 cursor-pointer">
                             <div className="flex items-center gap-2">
                               <span className={`w-2 h-2 rounded-full ${t.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></span>
                               <p className="text-sm font-bold text-gray-800">{t.category}</p>
@@ -370,6 +410,63 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Edit Transaction Modal */}
+      {editingTransaction && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className={`p-6 text-white text-center ${editingTransaction.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}>
+              <h3 className="text-xl font-black">แก้ไขรายการ</h3>
+              <p className="text-xs opacity-80 mt-1">{editingTransaction.type === 'income' ? 'รายรับ' : 'รายจ่าย'}</p>
+            </div>
+            <div className="p-8 space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">หมวดหมู่</label>
+                <input 
+                  type="text" 
+                  value={editingTransaction.category} 
+                  onChange={e => setEditingTransaction({...editingTransaction, category: e.target.value})}
+                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">จำนวนเงิน (฿)</label>
+                  <input 
+                    type="number" 
+                    value={editingTransaction.amount} 
+                    onChange={e => setEditingTransaction({...editingTransaction, amount: parseFloat(e.target.value) || 0})}
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-black text-orange-600"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">วัว</label>
+                  <select 
+                    value={editingTransaction.cowName}
+                    onChange={e => setEditingTransaction({...editingTransaction, cowName: e.target.value})}
+                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold"
+                  >
+                    <option value="โดยรวม">โดยรวม</option>
+                    {cows.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">บันทึกเพิ่มเติม</label>
+                <textarea 
+                  value={editingTransaction.note} 
+                  onChange={e => setEditingTransaction({...editingTransaction, note: e.target.value})}
+                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm h-20"
+                />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button onClick={() => setEditingTransaction(null)} className="flex-1 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold text-sm">ยกเลิก</button>
+                <button onClick={handleUpdateTransaction} className="flex-1 py-4 bg-orange-500 text-white rounded-2xl font-bold text-sm shadow-lg shadow-orange-200">บันทึกแก้ไข</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Navigation */}
       {profile && (

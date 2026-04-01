@@ -230,7 +230,29 @@ async function startServer() {
 
   app.delete("/api/transactions/:id", (req, res) => {
     const { id } = req.params;
-    db.prepare("DELETE FROM transactions WHERE id = ?").run(id);
+    const userId = req.query.userId as string;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const result = db.prepare("DELETE FROM transactions WHERE id = ? AND userId = ?").run(id, userId);
+    if (result.changes === 0) {
+      return res.status(403).json({ error: "Unauthorized or transaction not found" });
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/transactions/update", (req, res) => {
+    const { id, userId, category, amount, cowName, note } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const result = db.prepare(`
+      UPDATE transactions 
+      SET category = ?, amount = ?, cowName = ?, note = ?
+      WHERE id = ? AND userId = ?
+    `).run(category, amount, cowName, note, id, userId);
+    
+    if (result.changes === 0) {
+      return res.status(403).json({ error: "Unauthorized or transaction not found" });
+    }
     res.json({ success: true });
   });
 
@@ -365,12 +387,14 @@ async function handleEvent(event: any) {
   }
 
   // Save all transactions
+  const savedIds: number[] = [];
   for (const t of transactions) {
     try {
-      db.prepare(`
+      const result = db.prepare(`
         INSERT INTO transactions (userId, type, category, amount, note, cowName, rawText)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(userId, t.type, t.category, t.amount, t.note || userMessage, t.cowName, userMessage);
+      savedIds.push(result.lastInsertRowid as number);
     } catch (err) {
       console.error("Error saving transaction", err);
     }
@@ -403,15 +427,80 @@ async function handleEvent(event: any) {
     return `${i + 1}. ${t.category} (${t.cowName}): ${typeLabel} ฿${t.amount.toLocaleString()}`;
   }).join("\n");
 
-  let replyText = `บันทึกเรียบร้อยครับ! 📝\n\n${summary}\n\nแก้ไขได้ที่หน้าเว็บ KoSodsai ครับ`;
+  const liffId = process.env.VITE_LIFF_ID;
+  const baseUrl = liffId ? `https://liff.line.me/${liffId}` : "";
   
-  if (usedAI) {
-    replyText += `\n\n✨ ตีความโดย Gemini AI (${aiTokens} tokens)`;
-  }
+  const editUrl = savedIds.length === 1 
+    ? `${baseUrl}?tid=${savedIds[0]}`
+    : `${baseUrl}?tab=transactions`;
+
+  const flexMessage: any = {
+    type: "flex",
+    altText: "บันทึกรายการเรียบร้อยครับ",
+    contents: {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#F97316",
+        contents: [
+          {
+            type: "text",
+            text: "บันทึกเรียบร้อยครับ! 📝",
+            weight: "bold",
+            color: "#ffffff",
+            size: "lg"
+          }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "text",
+            text: summary,
+            wrap: true,
+            size: "sm",
+            color: "#374151"
+          },
+          {
+            type: "separator",
+            margin: "lg"
+          },
+          {
+            type: "text",
+            text: usedAI ? `✨ ตีความโดย Gemini AI (${aiTokens} tokens)` : "",
+            size: "xxs",
+            color: "#9CA3AF",
+            margin: "md"
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#F97316",
+            action: {
+              type: "uri",
+              label: savedIds.length === 1 ? "แก้ไขรายการนี้" : "ดูรายการทั้งหมด",
+              uri: editUrl
+            }
+          }
+        ]
+      }
+    }
+  };
 
   return client.replyMessage({
     replyToken: event.replyToken,
-    messages: [{ type: "text", text: replyText } as any],
+    messages: [flexMessage],
   });
 }
 
