@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import Fuse from "fuse.js";
 import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
+import { createTransactionFlexMessage } from "./flexMessages";
 
 dotenv.config();
 
@@ -465,79 +466,23 @@ async function handleEvent(event: any) {
   }).join("\n");
 
   const liffId = process.env.VITE_LIFF_ID;
-  const baseUrl = liffId ? `https://liff.line.me/${liffId}` : "";
+  const baseUrl = liffId ? `https://liff.line.me/${liffId}` : "https://line.me";
   
   const editUrl = savedIds.length === 1 
     ? `${baseUrl}?tid=${savedIds[0]}`
     : `${baseUrl}?tab=transactions`;
 
-  const flexMessage: any = {
-    type: "flex",
-    altText: "บันทึกรายการเรียบร้อยครับ",
-    contents: {
-      type: "bubble",
-      size: "mega",
-      header: {
-        type: "box",
-        layout: "vertical",
-        backgroundColor: "#F97316",
-        contents: [
-          {
-            type: "text",
-            text: "บันทึกเรียบร้อยครับ! 📝",
-            weight: "bold",
-            color: "#ffffff",
-            size: "lg"
-          }
-        ]
-      },
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          {
-            type: "text",
-            text: summary,
-            wrap: true,
-            size: "sm",
-            color: "#374151"
-          },
-          {
-            type: "separator",
-            margin: "lg"
-          },
-          {
-            type: "text",
-            text: usedAI ? `✨ ตีความโดย Gemini AI (${aiTokens} tokens)` : "",
-            size: "xxs",
-            color: "#9CA3AF",
-            margin: "md"
-          }
-        ]
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        spacing: "sm",
-        contents: [
-          {
-            type: "button",
-            style: "primary",
-            color: "#F97316",
-            action: {
-              type: "uri",
-              label: savedIds.length === 1 ? "แก้ไขรายการนี้" : "ดูรายการทั้งหมด",
-              uri: editUrl
-            }
-          }
-        ]
-      }
-    }
-  };
+  const flexMessage = createTransactionFlexMessage(
+    summary, 
+    editUrl, 
+    usedAI, 
+    aiTokens, 
+    savedIds.length === 1
+  );
 
   return client.replyMessage({
     replyToken: event.replyToken,
-    messages: [flexMessage],
+    messages: [flexMessage as any],
   });
 }
 
