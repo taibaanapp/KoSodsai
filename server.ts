@@ -8,8 +8,12 @@ import * as line from "@line/bot-sdk";
 import Database from "better-sqlite3";
 import Fuse from "fuse.js";
 import fs from "fs";
+import { GoogleGenAI, Type } from "@google/genai";
 
 dotenv.config();
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const model = "gemini-2.0-flash-exp"; // Using Flash for speed and accuracy
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +65,15 @@ db.exec(`
     content TEXT,
     date DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS ai_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId TEXT,
+    tokensPrompt INTEGER,
+    tokensResponse INTEGER,
+    tokensTotal INTEGER,
+    date DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // LINE config
@@ -88,48 +101,76 @@ const allKeywords = masterData.categories.flatMap((cat: any) =>
 );
 const fuse = new Fuse(allKeywords, { keys: ["word"], threshold: 0.4 });
 
-function parseMessage(text: string, userId: string) {
+async function parseWithAI(text: string, userId: string) {
+  const userCows = db.prepare("SELECT name FROM cows WHERE userId = ?").all(userId) as { name: string }[];
+  const cowList = userCows.map(c => c.name).join(", ") || "ไม่มีข้อมูล (ให้ใช้ 'โดยรวม')";
+  
+  const systemInstruction = `คุณคือผู้ช่วยจัดการฟาร์มวัว หน้าที่ของคุณคือตีความข้อความรายรับ-รายจ่าย
+  ข้อมูลหมวดหมู่ที่มี: ${JSON.stringify(masterData.categories)}
+  รายชื่อวัวของผู้ใช้คนนี้: ${cowList}
+  
+  กฎการทำงาน:
+  1. แยกข้อความออกเป็นรายการย่อยๆ (ถ้ามีหลายรายการ)
+  2. ระบุประเภท (income/expense), หมวดหมู่ (label), จำนวนเงิน (amount), ชื่อวัว (cowName), และบันทึก (note)
+  3. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
+  4. ตอบกลับเป็น JSON Array เท่านั้น ตามโครงสร้างนี้:
+  [{"type": "income/expense", "category": "ชื่อหมวดหมู่", "amount": 100, "cowName": "ชื่อวัว", "note": "ข้อความต้นฉบับ"}]`;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: model,
+      contents: [{ parts: [{ text }] }],
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+      },
+    });
+
+    const transactions = JSON.parse(result.text || "[]");
+    const usage = result.usageMetadata;
+
+    if (usage) {
+      db.prepare(`
+        INSERT INTO ai_usage (userId, tokensPrompt, tokensResponse, tokensTotal)
+        VALUES (?, ?, ?, ?)
+      `).run(userId, usage.promptTokenCount, usage.candidatesTokenCount, usage.totalTokenCount);
+    }
+
+    return { transactions, usage: usage?.totalTokenCount || 0 };
+  } catch (err) {
+    console.error("AI Parsing Error:", err);
+    return { transactions: [], usage: 0 };
+  }
+}
+
+function parseMessageLocal(text: string, userId: string) {
   const result: any = {
     type: "unknown",
     category: "ทั่วไป",
     amount: 0,
     cowName: "โดยรวม",
     note: text,
-    date: new Date().toISOString()
   };
 
-  // 1. Extract Amount (Regex)
   const amountMatch = text.match(/(\d+([.,]\d+)?)/);
-  if (amountMatch) {
-    result.amount = parseFloat(amountMatch[0].replace(",", ""));
-  }
+  if (amountMatch) result.amount = parseFloat(amountMatch[0].replace(",", ""));
 
-  // 2. Stage 1 & 2: Category Search (Exact & Fuzzy)
   const words = text.split(/\s+|ให้|กับ|ค่า|ของ/);
-  let bestMatch: any = null;
-
+  
   for (const word of words) {
     if (!word || word.length < 2) continue;
-    
-    // Fuzzy search
     const matches = fuse.search(word);
     if (matches.length > 0) {
-      bestMatch = matches[0].item;
+      const bestMatch = matches[0].item as any;
+      result.type = bestMatch.type;
+      result.category = bestMatch.label;
       break;
     }
   }
 
-  if (bestMatch) {
-    result.type = bestMatch.type;
-    result.category = bestMatch.label;
-  }
-
-  // 3. User-specific Cow Search
   const userCows = db.prepare("SELECT name FROM cows WHERE userId = ?").all(userId) as { name: string }[];
   if (userCows.length > 0) {
-    const cowNames = userCows.map(c => c.name);
-    const userCowFuse = new Fuse(cowNames, { threshold: 0.3 });
-    
+    const userCowFuse = new Fuse(userCows.map(c => c.name), { threshold: 0.3 });
     for (const word of words) {
       const matches = userCowFuse.search(word);
       if (matches.length > 0) {
@@ -262,6 +303,14 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // AI Usage API
+  app.get("/api/ai-usage", (req, res) => {
+    const userId = req.query.userId as string;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+    const usage = db.prepare("SELECT SUM(tokensTotal) as total FROM ai_usage WHERE userId = ?").get(userId) as { total: number };
+    res.json({ total: usage.total || 0 });
+  });
+
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", message: "KoSodsai API is running" });
@@ -295,20 +344,39 @@ async function handleEvent(event: any) {
   const userId = event.source.userId;
   const userMessage = event.message.text;
 
-  // 1. Parse Message
-  const parsed = parseMessage(userMessage, userId);
+  let transactions: any[] = [];
+  let aiTokens = 0;
+  let usedAI = false;
 
-  // 2. Save to Database
-  try {
-    db.prepare(`
-      INSERT INTO transactions (userId, type, category, amount, note, cowName, rawText)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, parsed.type, parsed.category, parsed.amount, parsed.note, parsed.cowName, userMessage);
-  } catch (err) {
-    console.error("Error saving transaction", err);
+  // Stage 1 & 2: Try Local first
+  const localParsed = parseMessageLocal(userMessage, userId);
+  
+  // If local parsing is too simple or message looks complex (contains multiple numbers or long text)
+  const isComplex = (userMessage.match(/\d+/g) || []).length > 1 || userMessage.length > 20;
+
+  if (isComplex || localParsed.type === "unknown") {
+    // Stage 3: AI Inference
+    const aiResult = await parseWithAI(userMessage, userId);
+    transactions = aiResult.transactions;
+    aiTokens = aiResult.usage;
+    usedAI = true;
+  } else {
+    transactions = [localParsed];
   }
 
-  // 3. Sync user profile
+  // Save all transactions
+  for (const t of transactions) {
+    try {
+      db.prepare(`
+        INSERT INTO transactions (userId, type, category, amount, note, cowName, rawText)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(userId, t.type, t.category, t.amount, t.note || userMessage, t.cowName, userMessage);
+    } catch (err) {
+      console.error("Error saving transaction", err);
+    }
+  }
+
+  // Sync user profile
   try {
     const profile = await client.getProfile(userId);
     const user = db.prepare("SELECT * FROM users WHERE userId = ?").get(userId) as any;
@@ -323,14 +391,23 @@ async function handleEvent(event: any) {
     console.error("Error fetching profile during webhook", err);
   }
 
-  const typeLabel = parsed.type === "income" ? "🟢 รายรับ" : parsed.type === "expense" ? "🔴 รายจ่าย" : "❓ ไม่ระบุ";
+  if (transactions.length === 0) {
+    return client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: "text", text: "ขออภัยครับ ผมไม่เข้าใจรายการนี้ รบกวนระบุรายละเอียดอีกครั้งครับ" } as any],
+    });
+  }
+
+  const summary = transactions.map((t, i) => {
+    const typeLabel = t.type === "income" ? "🟢 รับ" : "🔴 จ่าย";
+    return `${i + 1}. ${t.category} (${t.cowName}): ${typeLabel} ฿${t.amount.toLocaleString()}`;
+  }).join("\n");
+
+  let replyText = `บันทึกเรียบร้อยครับ! 📝\n\n${summary}\n\nแก้ไขได้ที่หน้าเว็บ KoSodsai ครับ`;
   
-  const replyText = `บันทึกข้อมูลแล้วครับ! 📝\n\n` +
-    `📌 เรื่อง: ${parsed.category}\n` +
-    `💰 ประเภท: ${typeLabel}\n` +
-    `🐮 วัว: ${parsed.cowName}\n` +
-    `💵 ยอดเงิน: ${parsed.amount.toLocaleString()} บาท\n\n` +
-    `หากข้อมูลไม่ถูกต้อง คุณสามารถแก้ไขได้ที่หน้าเว็บ KoSodsai ครับ`;
+  if (usedAI) {
+    replyText += `\n\n✨ ตีความโดย Gemini AI (${aiTokens} tokens)`;
+  }
 
   return client.replyMessage({
     replyToken: event.replyToken,

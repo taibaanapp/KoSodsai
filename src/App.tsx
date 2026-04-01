@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import liff from '@line/liff';
-import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2, LayoutDashboard, ListOrdered, Home, StickyNote, Save } from 'lucide-react';
+import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2, LayoutDashboard, ListOrdered, Home, StickyNote, Save, Sparkles } from 'lucide-react';
 
 interface UserProfile {
   userId: string;
@@ -48,6 +48,7 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [farmInfo, setFarmInfo] = useState<FarmInfo>({ farmName: '', ownerName: '', location: '', contact: '' });
   const [notes, setNotes] = useState<Note[]>([]);
+  const [aiUsage, setAiUsage] = useState<number>(0);
   
   const [newCowName, setNewCowName] = useState('');
   const [newNote, setNewNote] = useState({ title: '', content: '' });
@@ -56,17 +57,22 @@ export default function App() {
 
   const fetchData = async (userId: string) => {
     try {
-      const [cowsRes, transRes, farmRes, notesRes] = await Promise.all([
+      const [cowsRes, transRes, farmRes, notesRes, aiRes] = await Promise.all([
         fetch(`/api/cows?userId=${userId}`),
         fetch(`/api/transactions?userId=${userId}`),
         fetch(`/api/farm?userId=${userId}`),
-        fetch(`/api/notes?userId=${userId}`)
+        fetch(`/api/notes?userId=${userId}`),
+        fetch(`/api/ai-usage?userId=${userId}`)
       ]);
 
       if (cowsRes.ok) setCows(await cowsRes.json());
       if (transRes.ok) setTransactions(await transRes.json());
       if (farmRes.ok) setFarmInfo(await farmRes.json());
       if (notesRes.ok) setNotes(await notesRes.json());
+      if (aiRes.ok) {
+        const data = await aiRes.json();
+        setAiUsage(data.total);
+      }
     } catch (err) {
       console.error("Error fetching data:", err);
     }
@@ -252,6 +258,24 @@ export default function App() {
                     <p className="text-xs font-bold text-orange-600 uppercase tracking-widest mb-1">กำไรสุทธิ</p>
                     <p className="text-3xl font-black text-orange-700">฿{(totalIncome - totalExpense).toLocaleString()}</p>
                   </div>
+
+                  {/* AI Usage Card */}
+                  <div className="bg-purple-50 p-4 rounded-3xl border border-purple-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-purple-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-purple-200">
+                        <Sparkles size={20} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-purple-600 uppercase tracking-widest">การใช้ Gemini AI</p>
+                        <p className="text-sm font-black text-purple-700">{aiUsage.toLocaleString()} <span className="text-[10px] font-normal opacity-70">tokens</span></p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[8px] font-bold text-purple-400 uppercase">Status</p>
+                      <p className="text-[10px] font-bold text-green-600">Active</p>
+                    </div>
+                  </div>
+
                   <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100">
                     <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">ข้อมูลผู้ใช้</h3>
                     <div className="space-y-2">
