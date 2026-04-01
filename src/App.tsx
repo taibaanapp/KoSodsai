@@ -256,9 +256,8 @@ export default function App() {
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
 
   return (
-    <div className="h-screen w-full bg-gray-50 flex flex-col items-center overflow-hidden font-sans relative">
-      <div className="flex-1 w-full overflow-y-auto p-4 pb-32 flex flex-col items-center overscroll-none">
-        <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl shadow-orange-100/50 border border-gray-100 overflow-hidden">
+    <div className="min-h-screen w-full bg-gray-50 font-sans relative p-4 pb-32">
+      <div className="max-w-md w-full mx-auto bg-white rounded-[2.5rem] shadow-2xl shadow-orange-100/50 border border-gray-100 overflow-hidden">
         {/* Header */}
         <div className="bg-orange-500 p-6 text-white text-center relative">
           <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-2 shadow-lg">
@@ -411,7 +410,6 @@ export default function App() {
           )}
         </div>
       </div>
-    </div>
 
       {/* Edit Transaction Modal */}
       {editingTransaction && (
