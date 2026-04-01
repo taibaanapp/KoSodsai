@@ -5,11 +5,24 @@ import { fileURLToPath } from "url";
 import cors from "cors";
 import dotenv from "dotenv";
 import * as line from "@line/bot-sdk";
+import Database from "better-sqlite3";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize SQLite Database
+const db = new Database("kosodsai.db");
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    userId TEXT PRIMARY KEY,
+    displayName TEXT,
+    pictureUrl TEXT,
+    firstJoined DATETIME DEFAULT CURRENT_TIMESTAMP,
+    lastLogin DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
 // LINE config
 const lineConfig = {
@@ -17,48 +30,43 @@ const lineConfig = {
   channelSecret: process.env.LINE_CHANNEL_SECRET || "",
 };
 
-// Validate config before creating client
-if (!lineConfig.channelAccessToken) {
-  console.warn("WARNING: LINE_CHANNEL_ACCESS_TOKEN is missing. Messaging API will not work.");
-}
-if (!lineConfig.channelSecret) {
-  console.warn("WARNING: LINE_CHANNEL_SECRET is missing. Webhook signature verification will fail.");
-}
-
 const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: lineConfig.channelAccessToken,
 });
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 8080; // Changed to 8080 for Railway default
+  const PORT = Number(process.env.PORT) || 8080;
 
   app.use(cors());
+  app.use(express.json());
 
   // Root route for health check
   app.get("/", (req, res) => {
     res.send("<h1>KoSodsai Server is Online!</h1><p>Webhook is at /api/webhook</p>");
   });
 
-  // LINE Webhook (must be before express.json() for signature verification)
-  app.get("/api/webhook", (req, res) => {
-    res.send("LINE Webhook endpoint is active. Please use POST for actual webhooks.");
+  // Auth/User API
+  app.post("/api/user/sync", (req, res) => {
+    const { userId, displayName, pictureUrl } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const user = db.prepare("SELECT * FROM users WHERE userId = ?").get(userId) as any;
+    
+    if (user) {
+      db.prepare("UPDATE users SET lastLogin = CURRENT_TIMESTAMP, displayName = ?, pictureUrl = ? WHERE userId = ?")
+        .run(displayName, pictureUrl, userId);
+    } else {
+      db.prepare("INSERT INTO users (userId, displayName, pictureUrl) VALUES (?, ?, ?)")
+        .run(userId, displayName, pictureUrl);
+    }
+
+    const updatedUser = db.prepare("SELECT * FROM users WHERE userId = ?").get(userId);
+    res.json(updatedUser);
   });
 
-  // Safe Webhook Handler
-  app.post("/api/webhook", (req, res, next) => {
-    console.log("Incoming POST request to /api/webhook");
-    if (!lineConfig.channelSecret) {
-      console.error("CRITICAL: LINE_CHANNEL_SECRET is missing. Cannot process webhook.");
-      return res.status(500).send("Server Configuration Error");
-    }
-    next();
-  }, (req, res, next) => {
-    // Only apply line.middleware if secret is present to avoid crash
-    return line.middleware(lineConfig)(req, res, next);
-  }, (req, res) => {
-    console.log("Webhook signature verified, processing events...");
-    console.log("Body:", JSON.stringify(req.body, null, 2));
+  // LINE Webhook
+  app.post("/api/webhook", line.middleware(lineConfig), (req, res) => {
     Promise.all(req.body.events.map(handleEvent))
       .then((result) => res.json(result))
       .catch((err) => {
@@ -66,8 +74,6 @@ async function startServer() {
         res.status(500).end();
       });
   });
-
-  app.use(express.json());
 
   // API routes
   app.get("/api/health", (req, res) => {
@@ -99,10 +105,25 @@ async function handleEvent(event: any) {
     return Promise.resolve(null);
   }
 
+  const userId = event.source.userId;
   const userMessage = event.message.text;
-  const replyText = `คุณส่งข้อความว่า: "${userMessage}"`;
 
-  console.log(`Replying to ${event.replyToken} with: ${replyText}`);
+  // Sync user on message
+  try {
+    const profile = await client.getProfile(userId);
+    const user = db.prepare("SELECT * FROM users WHERE userId = ?").get(userId) as any;
+    if (user) {
+      db.prepare("UPDATE users SET lastLogin = CURRENT_TIMESTAMP, displayName = ? WHERE userId = ?")
+        .run(profile.displayName, userId);
+    } else {
+      db.prepare("INSERT INTO users (userId, displayName, pictureUrl) VALUES (?, ?, ?)")
+        .run(userId, profile.displayName, profile.pictureUrl);
+    }
+  } catch (err) {
+    console.error("Error fetching profile during webhook", err);
+  }
+
+  const replyText = `สวัสดีคุณ ${userId}\nคุณส่งข้อความว่า: "${userMessage}"\nเราบันทึกการใช้งานของคุณแล้ว!`;
 
   return client.replyMessage({
     replyToken: event.replyToken,
