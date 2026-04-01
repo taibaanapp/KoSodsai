@@ -14,17 +14,26 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase Admin
+// Initialize Firebase Admin (Optional)
 const firebaseConfigFile = path.join(process.cwd(), 'firebase-applet-config.json');
+let db: any = null;
+
 if (fs.existsSync(firebaseConfigFile)) {
-  const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigFile, 'utf8'));
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
+  try {
+    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigFile, 'utf8'));
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        projectId: firebaseConfig.projectId,
+      });
+    }
+    db = admin.firestore();
+    console.log("Firebase Admin initialized successfully");
+  } catch (err) {
+    console.error("Failed to initialize Firebase Admin:", err);
   }
+} else {
+  console.log("Firebase config not found, skipping Firestore initialization");
 }
-const db = admin.firestore();
 
 // LINE config
 const lineConfig = {
@@ -45,7 +54,7 @@ async function startServer() {
 
   app.use(cors());
 
-  // LINE Webhook (must be before express.json() for signature verification) u
+  // LINE Webhook (must be before express.json() for signature verification)
   app.get("/api/webhook", (req, res) => {
     res.send("LINE Webhook endpoint is active. Please use POST for actual webhooks.");
   });
