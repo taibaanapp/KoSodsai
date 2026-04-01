@@ -52,11 +52,6 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Root route for health check
-  app.get("/", (req, res) => {
-    res.send("<h1>KoSodsai Server is Online!</h1><p>Webhook is at /api/webhook</p>");
-  });
-
   // Auth/User API
   app.post("/api/user/sync", (req, res) => {
     const { userId, displayName, pictureUrl } = req.body;
