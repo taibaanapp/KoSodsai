@@ -41,7 +41,7 @@ const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.use(cors());
 
@@ -50,8 +50,14 @@ async function startServer() {
     res.send("LINE Webhook endpoint is active. Please use POST for actual webhooks.");
   });
 
-  app.post("/api/webhook", line.middleware(lineConfig), (req, res) => {
-    console.log("Webhook received:", JSON.stringify(req.body, null, 2));
+  app.post("/api/webhook", (req, res, next) => {
+    // Log for debugging
+    console.log("Incoming POST request to /api/webhook");
+    console.log("Headers:", JSON.stringify(req.headers, null, 2));
+    next();
+  }, line.middleware(lineConfig), (req, res) => {
+    console.log("Webhook signature verified, processing events...");
+    console.log("Body:", JSON.stringify(req.body, null, 2));
     Promise.all(req.body.events.map(handleEvent))
       .then((result) => res.json(result))
       .catch((err) => {
