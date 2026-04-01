@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import liff from '@line/liff';
-import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2, LayoutDashboard, ListOrdered, Home, StickyNote, Save, Sparkles } from 'lucide-react';
+import { Beef, LogIn, User, Calendar, Clock, ShieldCheck, Plus, Trash2, LayoutDashboard, ListOrdered, Home, StickyNote, Save, Sparkles, Milk, Wheat, PlusSquare, ShoppingCart, ChevronDown, BarChart3, History, LogOut, Search, ChevronRight, TrendingUp, TrendingDown, FileText, Settings, X } from 'lucide-react';
 
 interface UserProfile {
   userId: string;
@@ -39,11 +39,13 @@ interface Note {
   date: string;
 }
 
-type Tab = 'dashboard' | 'transactions' | 'cows' | 'farm' | 'notes';
+type Tab = 'dashboard' | 'transactions' | 'cows' | 'farm' | 'notes' | 'reports' | 'settings';
 
 export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [filter, setFilter] = useState<'all' | 'income' | 'expense'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [cows, setCows] = useState<Cow[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [farmInfo, setFarmInfo] = useState<FarmInfo>({ farmName: '', ownerName: '', location: '', contact: '' });
@@ -245,252 +247,435 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-orange-600 flex flex-col items-center justify-center p-6 text-white">
-        <div className="animate-bounce mb-4"><Beef size={64} /></div>
-        <p className="font-bold tracking-widest animate-pulse uppercase">Loading KoSodsai...</p>
+      <div className="min-h-screen bg-[#1B4332] flex flex-col items-center justify-center p-6 text-white text-center">
+        <div className="animate-bounce mb-6"><Beef size={80} /></div>
+        <p className="font-black text-xl tracking-widest animate-pulse uppercase font-display">กำลังโหลดข้อมูล...</p>
       </div>
     );
   }
 
+  const filteredTransactions = transactions.filter(t => {
+    const matchesFilter = filter === 'all' || t.type === filter;
+    const matchesSearch = t.category.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          t.cowName.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
 
+  const getCategoryIcon = (category: string) => {
+    const lower = category.toLowerCase();
+    if (lower.includes('ขาย') || lower.includes('sell')) return <ShoppingCart size={32} className="text-orange-600" />;
+    if (lower.includes('อาหาร') || lower.includes('feed')) return <Wheat size={32} className="text-yellow-600" />;
+    if (lower.includes('ยา') || lower.includes('รักษา') || lower.includes('หมอ')) return <PlusSquare size={32} className="text-green-600" />;
+    if (lower.includes('ผสม') || lower.includes('พันธุ์')) return <Beef size={32} className="text-pink-500" />;
+    return <Beef size={32} className="text-gray-400" />;
+  };
+
   return (
-    <div className="min-h-screen w-full bg-gray-50 font-sans relative p-4 pb-32">
-      <div className="max-w-md w-full mx-auto bg-white rounded-[2.5rem] shadow-2xl shadow-orange-100/50 border border-gray-100 overflow-hidden">
-        {/* Header */}
-        <div className="bg-orange-500 p-6 text-white text-center relative">
-          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-2 shadow-lg">
-            <Beef size={32} className="text-orange-500" />
+    <div className="min-h-screen w-full bg-[#F8F9F5] font-sans relative pb-32">
+      {/* Top Green Accent Background */}
+      <div className="h-48 bg-[#1B4332] w-full absolute top-0 left-0 z-0 rounded-b-[3rem]" />
+
+      <div className="max-w-md mx-auto relative z-10 pt-8 px-4">
+        {/* Header Section */}
+        <div className="flex items-center justify-between mb-8 px-2">
+          <div className="text-white">
+            <h1 className="text-3xl font-black font-display leading-tight tracking-tight">
+              ประวัติฟาร์ม
+            </h1>
+            <p className="text-[#D8F3DC] font-medium opacity-90">จัดการข้อมูลวัวและรายการบัญชี</p>
           </div>
-          <h1 className="text-2xl font-black tracking-tight">โคสดใส</h1>
-          {profile && (
-            <div className="flex items-center justify-center gap-2 mt-2">
-              <img src={profile.pictureUrl} className="w-6 h-6 rounded-full border border-white/50" referrerPolicy="no-referrer" />
-              <span className="text-xs font-bold">{profile.displayName}</span>
-            </div>
-          )}
+          <div className="bg-white/20 backdrop-blur-md p-2 rounded-full border border-white/30">
+            {profile?.pictureUrl ? (
+              <img 
+                src={profile.pictureUrl} 
+                alt="โปรไฟล์" 
+                className="w-10 h-10 rounded-full border-2 border-white"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-10 h-10 bg-[#2D6A4F] rounded-full flex items-center justify-center text-white font-bold">
+                {profile?.displayName?.charAt(0) || 'ฟ'}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="p-6">
-          {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-xl text-center">{error}</div>}
+        {/* Main Content Card */}
+        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-green-900/10 border border-gray-100 overflow-hidden min-h-[70vh] mb-8">
+          
+          {activeTab === 'transactions' && (
+            <div className="p-6 space-y-6">
+              {/* Date Selector */}
+              <div className="flex items-center justify-between bg-[#F8F9F5] border border-gray-200 rounded-2xl px-5 py-4 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <Calendar size={20} className="text-[#1B4332]" />
+                  <span className="text-sm font-bold text-gray-800">1 เม.ย. 2569 – 30 เม.ย. 2569</span>
+                </div>
+                <ChevronRight size={18} className="text-gray-400" />
+              </div>
 
-          {!profile ? (
-            <div className="text-center py-8">
-              <p className="text-gray-500 text-sm mb-8">กรุณาเข้าสู่ระบบด้วย LINE เพื่อเริ่มใช้งาน</p>
-              <button onClick={handleLogin} className="w-full py-4 bg-[#06C755] text-white rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg"><LogIn size={20} /> LOGIN WITH LINE</button>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {activeTab === 'dashboard' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-green-50 p-4 rounded-3xl border border-green-100 overflow-hidden">
-                      <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1 truncate">รายรับรวม</p>
-                      <p className="text-lg sm:text-xl font-black text-green-700 truncate">฿{totalIncome.toLocaleString()}</p>
-                    </div>
-                    <div className="bg-red-50 p-4 rounded-3xl border border-red-100 overflow-hidden">
-                      <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-1 truncate">รายจ่ายรวม</p>
-                      <p className="text-lg sm:text-xl font-black text-red-700 truncate">฿{totalExpense.toLocaleString()}</p>
-                    </div>
-                  </div>
-                  <div className="bg-orange-50 p-6 rounded-3xl border border-orange-100 text-center overflow-hidden">
-                    <p className="text-xs font-bold text-orange-600 uppercase tracking-widest mb-1 truncate">กำไรสุทธิ</p>
-                    <p className="text-2xl sm:text-3xl font-black text-orange-700 truncate">฿{(totalIncome - totalExpense).toLocaleString()}</p>
-                  </div>
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="ค้นหารายการ..."
+                  className="w-full bg-[#F8F9F5] border border-gray-200 rounded-2xl py-4 pl-12 pr-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#1B4332]/20 transition-all"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
 
-                  {/* AI Usage Card */}
-                  <div className="bg-purple-50 p-4 rounded-3xl border border-purple-100 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-purple-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-purple-200">
-                        <Sparkles size={20} />
+              {/* Filter Segmented Control */}
+              <div className="flex p-1 bg-[#F8F9F5] rounded-2xl border border-gray-200">
+                <button 
+                  onClick={() => setFilter('all')}
+                  className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${filter === 'all' ? 'bg-white text-[#1B4332] shadow-md' : 'text-gray-500'}`}
+                >
+                  ทั้งหมด
+                </button>
+                <button 
+                  onClick={() => setFilter('income')}
+                  className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${filter === 'income' ? 'bg-white text-[#2D6A4F] shadow-md' : 'text-gray-500'}`}
+                >
+                  รายรับ
+                </button>
+                <button 
+                  onClick={() => setFilter('expense')}
+                  className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${filter === 'expense' ? 'bg-white text-[#A4161A] shadow-md' : 'text-gray-500'}`}
+                >
+                  รายจ่าย
+                </button>
+              </div>
+
+              {/* Transactions List */}
+              <div className="space-y-4 pt-2">
+                {filteredTransactions.length > 0 ? (
+                  filteredTransactions.map((t) => (
+                    <div 
+                      key={t.id} 
+                      className="flex items-center gap-4 p-4 bg-white border border-gray-100 rounded-3xl hover:shadow-lg transition-all cursor-pointer group"
+                      onClick={() => setEditingTransaction(t)}
+                    >
+                      <div className="w-14 h-14 bg-[#F8F9F5] rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                        {getCategoryIcon(t.category)}
                       </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-purple-600 uppercase tracking-widest">การใช้ Gemini AI</p>
-                        <p className="text-sm font-black text-purple-700">{aiUsage.toLocaleString()} <span className="text-[10px] font-normal opacity-70">tokens</span></p>
+                      <div className="flex-1">
+                        <h4 className="font-bold text-gray-900 text-base">{t.category}</h4>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{t.cowName}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-lg font-black font-display ${t.type === 'income' ? 'text-[#2D6A4F]' : 'text-[#A4161A]'}`}>
+                          {t.type === 'income' ? '+' : '-'}{t.amount.toLocaleString()}
+                        </p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">{new Date(t.date).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[8px] font-bold text-purple-400 uppercase">Status</p>
-                      <p className="text-[10px] font-bold text-green-600">Active</p>
+                  ))
+                ) : (
+                  <div className="py-20 text-center space-y-4">
+                    <div className="w-20 h-20 bg-[#F8F9F5] rounded-full flex items-center justify-center mx-auto">
+                      <Search size={32} className="text-gray-300" />
                     </div>
+                    <p className="text-gray-400 font-bold">ไม่พบรายการที่ค้นหา</p>
                   </div>
-
-                  <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100">
-                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">ข้อมูลผู้ใช้</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-xs"><span className="text-gray-500">LINE ID:</span><span className="font-mono text-gray-700">{profile.userId.slice(0, 10)}...</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-gray-500">เข้าร่วมเมื่อ:</span><span className="font-bold text-gray-700">{new Date(profile.firstJoined).toLocaleDateString('th-TH')}</span></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'transactions' && (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-black flex items-center gap-2"><ListOrdered size={18} className="text-orange-500" /> ประวัติรายการ</h3>
-                  <div className="space-y-2 pr-1">
-                    {transactions.length === 0 ? <p className="text-center text-gray-400 text-xs py-8">ยังไม่มีรายการบันทึก</p> : 
-                      transactions.map(t => (
-                        <div key={t.id} className="p-3 bg-gray-50 rounded-2xl border border-gray-100 flex justify-between items-center">
-                          <div onClick={() => setEditingTransaction(t)} className="flex-1 cursor-pointer">
-                            <div className="flex items-center gap-2">
-                              <span className={`w-2 h-2 rounded-full ${t.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                              <p className="text-sm font-bold text-gray-800">{t.category}</p>
-                            </div>
-                            <p className="text-[10px] text-gray-400 font-medium">{t.cowName} • {new Date(t.date).toLocaleDateString('th-TH')}</p>
-                          </div>
-                          <div className="text-right flex items-center gap-3">
-                            <p className={`text-sm font-black ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                              {t.type === 'income' ? '+' : '-'}฿{t.amount.toLocaleString()}
-                            </p>
-                            <button onClick={() => handleDeleteTransaction(t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
-                          </div>
-                        </div>
-                      ))
-                    }
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'cows' && (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-black flex items-center gap-2"><Beef size={18} className="text-orange-500" /> จัดการรายชื่อวัว</h3>
-                  <div className="flex gap-2">
-                    <input type="text" value={newCowName} onChange={(e) => setNewCowName(e.target.value)} placeholder="ชื่อวัว..." className="flex-1 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" />
-                    <button onClick={handleAddCow} className="bg-orange-500 text-white p-2 rounded-xl"><Plus size={20} /></button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {cows.map(cow => (
-                      <div key={cow.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
-                        <span className="text-xs font-bold text-gray-700">{cow.name}</span>
-                        <button onClick={() => handleDeleteCow(cow.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'farm' && (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-black flex items-center gap-2"><Home size={18} className="text-orange-500" /> ข้อมูลฟาร์ม</h3>
-                  <div className="space-y-3">
-                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ชื่อฟาร์ม</label><input type="text" value={farmInfo.farmName} onChange={e => setFarmInfo({...farmInfo, farmName: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" /></div>
-                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">เจ้าของฟาร์ม</label><input type="text" value={farmInfo.ownerName} onChange={e => setFarmInfo({...farmInfo, ownerName: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" /></div>
-                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ที่ตั้ง</label><textarea value={farmInfo.location} onChange={e => setFarmInfo({...farmInfo, location: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm h-20" /></div>
-                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ติดต่อ</label><input type="text" value={farmInfo.contact} onChange={e => setFarmInfo({...farmInfo, contact: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" /></div>
-                    <button onClick={handleUpdateFarm} className="w-full py-3 bg-orange-500 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg"><Save size={18} /> บันทึกข้อมูลฟาร์ม</button>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'notes' && (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-black flex items-center gap-2"><StickyNote size={18} className="text-orange-500" /> บันทึกอื่น ๆ</h3>
-                  <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100 space-y-3">
-                    <input type="text" value={newNote.title} onChange={e => setNewNote({...newNote, title: e.target.value})} placeholder="หัวข้อ..." className="w-full bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm" />
-                    <textarea value={newNote.content} onChange={e => setNewNote({...newNote, content: e.target.value})} placeholder="รายละเอียด..." className="w-full bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm h-24" />
-                    <button onClick={handleAddNote} className="w-full py-2 bg-orange-500 text-white rounded-xl font-bold text-xs">เพิ่มบันทึก</button>
-                  </div>
-                  <div className="space-y-3">
-                    {notes.map(note => (
-                      <div key={note.id} className="p-4 bg-white rounded-2xl border border-gray-100 shadow-sm relative">
-                        <button onClick={() => handleDeleteNote(note.id)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500"><Trash2 size={16} /></button>
-                        <h4 className="text-sm font-black text-gray-800 pr-8">{note.title}</h4>
-                        <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">{note.content}</p>
-                        <p className="text-[10px] text-gray-300 mt-2 font-bold uppercase">{new Date(note.date).toLocaleDateString('th-TH')}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <button onClick={handleLogout} className="w-full py-3 text-gray-400 text-[10px] font-bold uppercase tracking-[0.2em] hover:text-red-500 transition-colors">Logout from System</button>
+                )}
+              </div>
             </div>
           )}
+
+          {activeTab === 'dashboard' && (
+            <div className="p-8 space-y-8">
+              <div className="space-y-2">
+                <h3 className="text-2xl font-black text-gray-900 font-display">สรุปภาพรวม</h3>
+                <p className="text-sm font-bold text-gray-400">ข้อมูลฟาร์มประจำเดือนนี้</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                <div className="bg-[#D8F3DC] p-6 rounded-[2rem] border border-[#B7E4C7] shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-white rounded-2xl text-[#2D6A4F]">
+                      <TrendingUp size={24} />
+                    </div>
+                    <span className="text-xs font-black text-[#2D6A4F] uppercase tracking-widest">รายรับ</span>
+                  </div>
+                  <p className="text-sm font-bold text-[#2D6A4F]/70 mb-1">รายรับทั้งหมด</p>
+                  <p className="text-4xl font-black text-[#1B4332] font-display">฿{totalIncome.toLocaleString()}</p>
+                </div>
+
+                <div className="bg-[#FEE2E2] p-6 rounded-[2rem] border border-[#FECACA] shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-white rounded-2xl text-[#A4161A]">
+                      <TrendingDown size={24} />
+                    </div>
+                    <span className="text-xs font-black text-[#A4161A] uppercase tracking-widest">รายจ่าย</span>
+                  </div>
+                  <p className="text-sm font-bold text-[#A4161A]/70 mb-1">รายจ่ายทั้งหมด</p>
+                  <p className="text-4xl font-black text-[#7F1D1D] font-display">฿{totalExpense.toLocaleString()}</p>
+                </div>
+
+                <div className="bg-[#1B4332] p-8 rounded-[2.5rem] shadow-xl shadow-green-900/20 text-white relative overflow-hidden">
+                  <div className="relative z-10">
+                    <p className="text-sm font-bold text-white/70 mb-2 uppercase tracking-widest">กำไรสุทธิ</p>
+                    <p className="text-5xl font-black font-display">฿{(totalIncome - totalExpense).toLocaleString()}</p>
+                    <div className="mt-6 inline-flex items-center gap-2 bg-white/20 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
+                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                      <span className="text-xs font-bold">กำไรสุทธิเดือนนี้</span>
+                    </div>
+                  </div>
+                  <BarChart3 size={120} className="absolute -right-8 -bottom-8 text-white/5 rotate-12" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'cows' && (
+            <div className="p-8 space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-2xl font-black text-gray-900 font-display">วัวในฟาร์ม</h3>
+                <button className="bg-[#1B4332] text-white p-3 rounded-2xl shadow-lg shadow-green-900/20">
+                  <Plus size={20} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {cows.map(cow => (
+                  <div key={cow.id} className="bg-[#F8F9F5] p-5 rounded-[2rem] border border-gray-100 hover:shadow-md transition-all text-center space-y-3">
+                    <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                      <Beef size={32} className="text-[#1B4332]" />
+                    </div>
+                    <div>
+                      <p className="font-black text-gray-900 text-lg">{cow.name}</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{cow.breed || 'ไม่ระบุสายพันธุ์'}</p>
+                    </div>
+                    <div className="pt-2">
+                      <span className="bg-white px-3 py-1 rounded-full text-[10px] font-black text-[#1B4332] border border-gray-100">
+                        {cow.status || 'ปกติ'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'farm' && (
+            <div className="p-8 space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-2xl font-black text-gray-900 font-display">ข้อมูลฟาร์ม</h3>
+                <button onClick={handleUpdateFarm} className="bg-[#1B4332] text-white p-3 rounded-2xl shadow-lg shadow-green-900/20">
+                  <Save size={20} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-2">ชื่อฟาร์ม</label>
+                  <input 
+                    type="text" 
+                    value={farmInfo.farmName} 
+                    onChange={e => setFarmInfo({...farmInfo, farmName: e.target.value})} 
+                    className="w-full bg-[#F8F9F5] border-2 border-gray-100 rounded-3xl p-5 text-lg font-bold text-gray-900 focus:border-[#1B4332] focus:outline-none transition-all" 
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-2">เจ้าของฟาร์ม</label>
+                  <input 
+                    type="text" 
+                    value={farmInfo.ownerName} 
+                    onChange={e => setFarmInfo({...farmInfo, ownerName: e.target.value})} 
+                    className="w-full bg-[#F8F9F5] border-2 border-gray-100 rounded-3xl p-5 text-lg font-bold text-gray-900 focus:border-[#1B4332] focus:outline-none transition-all" 
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'notes' && (
+            <div className="p-8 space-y-8">
+              <div className="flex items-center justify-between">
+                <h3 className="text-2xl font-black text-gray-900 font-display">บันทึก</h3>
+                <button onClick={handleAddNote} className="bg-[#1B4332] text-white p-3 rounded-2xl shadow-lg shadow-green-900/20">
+                  <Plus size={20} />
+                </button>
+              </div>
+              
+              <div className="bg-[#F8F9F5] p-6 rounded-[2.5rem] space-y-4 border border-gray-100">
+                <input 
+                  type="text" 
+                  value={newNote.title} 
+                  onChange={e => setNewNote({...newNote, title: e.target.value})} 
+                  placeholder="หัวข้อบันทึก..." 
+                  className="w-full bg-white border-none rounded-2xl px-6 py-4 text-sm font-bold focus:ring-2 focus:ring-[#1B4332]/20" 
+                />
+                <textarea 
+                  value={newNote.content} 
+                  onChange={e => setNewNote({...newNote, content: e.target.value})} 
+                  placeholder="รายละเอียด..." 
+                  className="w-full bg-white border-none rounded-2xl px-6 py-4 text-sm font-medium h-32 focus:ring-2 focus:ring-[#1B4332]/20" 
+                />
+              </div>
+
+              <div className="space-y-4">
+                {notes.map(note => (
+                  <div key={note.id} className="p-6 bg-white rounded-[2.5rem] border border-gray-100 shadow-sm relative group">
+                    <button 
+                      onClick={() => handleDeleteNote(note.id)} 
+                      className="absolute top-6 right-6 text-gray-300 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                    <h4 className="text-lg font-black text-gray-900 pr-12 leading-tight">{note.title}</h4>
+                    <p className="text-sm text-gray-500 mt-2 whitespace-pre-wrap font-medium leading-relaxed">{note.content}</p>
+                    <div className="mt-4 flex items-center gap-2">
+                      <Calendar size={12} className="text-gray-300" />
+                      <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">
+                        {new Date(note.date).toLocaleDateString('th-TH')}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'reports' && (
+            <div className="p-8 space-y-8">
+              <h3 className="text-2xl font-black text-gray-900 font-display">รายงาน</h3>
+              <div className="space-y-4">
+                <div className="bg-[#F8F9F5] p-6 rounded-3xl border border-gray-100 flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                    <FileText size={24} className="text-[#1B4332]" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-900">รายงานการเจริญเติบโต</p>
+                    <p className="text-xs font-bold text-gray-400">ประจำเดือน เมษายน</p>
+                  </div>
+                  <ChevronRight size={20} className="ml-auto text-gray-300" />
+                </div>
+                <div className="bg-[#F8F9F5] p-6 rounded-3xl border border-gray-100 flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                    <FileText size={24} className="text-[#1B4332]" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-900">รายงานค่าอาหารและยา</p>
+                    <p className="text-xs font-bold text-gray-400">ประจำเดือน เมษายน</p>
+                  </div>
+                  <ChevronRight size={20} className="ml-auto text-gray-300" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'settings' && (
+            <div className="p-8 space-y-8">
+              <h3 className="text-2xl font-black text-gray-900 font-display">ตั้งค่า</h3>
+              <div className="space-y-4">
+                <div className="flex items-center gap-4 p-4 bg-[#F8F9F5] rounded-3xl border border-gray-100">
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                    <User size={24} className="text-[#1B4332]" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-gray-900">{profile?.displayName || 'ผู้ใช้งานฟาร์ม'}</p>
+                    <p className="text-xs font-bold text-gray-400">จัดการโปรไฟล์</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-4 p-4 bg-red-50 rounded-3xl border border-red-100 text-red-600 hover:bg-red-100 transition-colors"
+                >
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                    <LogOut size={24} />
+                  </div>
+                  <p className="font-bold">ออกจากระบบ</p>
+                </button>
+              </div>
+            </div>
+          )}
+          </div>
+        </div>
+
+      {/* Sleek Bottom Navigation */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 px-6 pb-8">
+        <div className="max-w-md mx-auto bg-white/80 backdrop-blur-2xl rounded-[2.5rem] shadow-2xl border border-white/50 p-3 flex items-center justify-between">
+          <button 
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex flex-col items-center justify-center w-14 h-14 rounded-2xl transition-all ${activeTab === 'dashboard' ? 'bg-[#1B4332] text-white shadow-lg shadow-green-900/20' : 'text-gray-400 hover:bg-gray-50'}`}
+          >
+            <LayoutDashboard size={22} />
+          </button>
+          <button 
+            onClick={() => setActiveTab('transactions')}
+            className={`flex flex-col items-center justify-center w-14 h-14 rounded-2xl transition-all ${activeTab === 'transactions' ? 'bg-[#1B4332] text-white shadow-lg shadow-green-900/20' : 'text-gray-400 hover:bg-gray-50'}`}
+          >
+            <History size={22} />
+          </button>
+          <button 
+            className="flex flex-col items-center justify-center w-16 h-16 rounded-3xl bg-[#2D6A4F] text-white shadow-xl shadow-green-900/30 -mt-8 border-4 border-[#F8F9F5] hover:scale-110 transition-transform"
+          >
+            <Plus size={28} />
+          </button>
+          <button 
+            onClick={() => setActiveTab('reports')}
+            className={`flex flex-col items-center justify-center w-14 h-14 rounded-2xl transition-all ${activeTab === 'reports' ? 'bg-[#1B4332] text-white shadow-lg shadow-green-900/20' : 'text-gray-400 hover:bg-gray-50'}`}
+          >
+            <BarChart3 size={22} />
+          </button>
+          <button 
+            onClick={() => setActiveTab('settings')}
+            className={`flex flex-col items-center justify-center w-14 h-14 rounded-2xl transition-all ${activeTab === 'settings' ? 'bg-[#1B4332] text-white shadow-lg shadow-green-900/20' : 'text-gray-400 hover:bg-gray-50'}`}
+          >
+            <Settings size={22} />
+          </button>
         </div>
       </div>
 
-      {/* Edit Transaction Modal */}
+      {/* Redesigned Edit Transaction Modal */}
       {editingTransaction && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] overflow-y-auto max-h-[90vh] shadow-2xl animate-in fade-in zoom-in duration-200">
-            <div className={`p-6 text-white text-center ${editingTransaction.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}>
-              <h3 className="text-xl font-black">แก้ไขรายการ</h3>
-              <p className="text-xs opacity-80 mt-1">{editingTransaction.type === 'income' ? 'รายรับ' : 'รายจ่าย'}</p>
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-white rounded-[3rem] p-8 space-y-8 animate-in slide-in-from-bottom duration-300">
+            <div className="flex items-center justify-between">
+              <h3 className="text-2xl font-black text-gray-900 font-display">แก้ไขรายการ</h3>
+              <button onClick={() => setEditingTransaction(null)} className="p-2 bg-gray-100 rounded-full text-gray-400">
+                <X size={20} />
+              </button>
             </div>
-            <div className="p-8 space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">หมวดหมู่</label>
+            
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-2">จำนวนเงิน (฿)</label>
                 <input 
-                  type="text" 
-                  value={editingTransaction.category} 
-                  onChange={e => setEditingTransaction({...editingTransaction, category: e.target.value})}
-                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold"
+                  type="number" 
+                  className="w-full bg-[#F8F9F5] border-2 border-gray-100 rounded-3xl p-6 text-3xl font-black font-display text-[#1B4332] focus:border-[#1B4332] focus:outline-none transition-all"
+                  value={editingTransaction.amount}
+                  onChange={(e) => setEditingTransaction({...editingTransaction, amount: Number(e.target.value)})}
                 />
               </div>
+
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">จำนวนเงิน (฿)</label>
-                  <input 
-                    type="number" 
-                    value={editingTransaction.amount} 
-                    onChange={e => setEditingTransaction({...editingTransaction, amount: parseFloat(e.target.value) || 0})}
-                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-black text-orange-600"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">วัว</label>
-                  <select 
-                    value={editingTransaction.cowName}
-                    onChange={e => setEditingTransaction({...editingTransaction, cowName: e.target.value})}
-                    className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold"
-                  >
-                    <option value="โดยรวม">โดยรวม</option>
-                    {cows.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                  </select>
-                </div>
+                <button 
+                  onClick={() => setEditingTransaction({...editingTransaction, type: 'income'})}
+                  className={`py-4 rounded-2xl font-bold border-2 transition-all ${editingTransaction.type === 'income' ? 'bg-[#D8F3DC] border-[#2D6A4F] text-[#1B4332]' : 'bg-white border-gray-100 text-gray-400'}`}
+                >
+                  รายรับ
+                </button>
+                <button 
+                  onClick={() => setEditingTransaction({...editingTransaction, type: 'expense'})}
+                  className={`py-4 rounded-2xl font-bold border-2 transition-all ${editingTransaction.type === 'expense' ? 'bg-[#FEE2E2] border-[#A4161A] text-[#7F1D1D]' : 'bg-white border-gray-100 text-gray-400'}`}
+                >
+                  รายจ่าย
+                </button>
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">บันทึกเพิ่มเติม</label>
-                <textarea 
-                  value={editingTransaction.note} 
-                  onChange={e => setEditingTransaction({...editingTransaction, note: e.target.value})}
-                  className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm h-20"
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button onClick={() => setEditingTransaction(null)} className="flex-1 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold text-sm">ยกเลิก</button>
-                <button onClick={handleUpdateTransaction} className="flex-1 py-4 bg-orange-500 text-white rounded-2xl font-bold text-sm shadow-lg shadow-orange-200">บันทึกแก้ไข</button>
-              </div>
+
+              <button 
+                onClick={handleUpdateTransaction}
+                className="w-full bg-[#1B4332] text-white py-5 rounded-3xl font-black text-lg shadow-xl shadow-green-900/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+              >
+                บันทึกการเปลี่ยนแปลง
+              </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Bottom Navigation */}
-      {profile && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 max-w-md w-[90%] bg-white/80 backdrop-blur-xl border border-white/50 rounded-[2rem] shadow-2xl p-2 flex justify-between items-center z-50">
-          <button onClick={() => setActiveTab('dashboard')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'dashboard' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
-            <LayoutDashboard size={20} />
-            <span className="text-[8px] font-bold mt-1 uppercase">หน้าแรก</span>
-          </button>
-          <button onClick={() => setActiveTab('transactions')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'transactions' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
-            <ListOrdered size={20} />
-            <span className="text-[8px] font-bold mt-1 uppercase">รายการ</span>
-          </button>
-          <button onClick={() => setActiveTab('cows')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'cows' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
-            <Beef size={20} />
-            <span className="text-[8px] font-bold mt-1 uppercase">วัว</span>
-          </button>
-          <button onClick={() => setActiveTab('farm')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'farm' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
-            <Home size={20} />
-            <span className="text-[8px] font-bold mt-1 uppercase">ฟาร์ม</span>
-          </button>
-          <button onClick={() => setActiveTab('notes')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'notes' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
-            <StickyNote size={20} />
-            <span className="text-[8px] font-bold mt-1 uppercase">บันทึก</span>
-          </button>
         </div>
       )}
     </div>
