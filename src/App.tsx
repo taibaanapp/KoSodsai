@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import liff from '@line/liff';
-import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2 } from 'lucide-react';
+import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2, LayoutDashboard, ListOrdered, Home, StickyNote, Save } from 'lucide-react';
 
 interface UserProfile {
   userId: string;
@@ -15,22 +15,60 @@ interface Cow {
   name: string;
 }
 
+interface Transaction {
+  id: number;
+  type: string;
+  category: string;
+  amount: number;
+  note: string;
+  cowName: string;
+  date: string;
+}
+
+interface FarmInfo {
+  farmName: string;
+  ownerName: string;
+  location: string;
+  contact: string;
+}
+
+interface Note {
+  id: number;
+  title: string;
+  content: string;
+  date: string;
+}
+
+type Tab = 'dashboard' | 'transactions' | 'cows' | 'farm' | 'notes';
+
 export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [cows, setCows] = useState<Cow[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [farmInfo, setFarmInfo] = useState<FarmInfo>({ farmName: '', ownerName: '', location: '', contact: '' });
+  const [notes, setNotes] = useState<Note[]>([]);
+  
   const [newCowName, setNewCowName] = useState('');
+  const [newNote, setNewNote] = useState({ title: '', content: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchCows = async (userId: string) => {
+  const fetchData = async (userId: string) => {
     try {
-      const res = await fetch(`/api/cows?userId=${userId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCows(data);
-      }
+      const [cowsRes, transRes, farmRes, notesRes] = await Promise.all([
+        fetch(`/api/cows?userId=${userId}`),
+        fetch(`/api/transactions?userId=${userId}`),
+        fetch(`/api/farm?userId=${userId}`),
+        fetch(`/api/notes?userId=${userId}`)
+      ]);
+
+      if (cowsRes.ok) setCows(await cowsRes.json());
+      if (transRes.ok) setTransactions(await transRes.json());
+      if (farmRes.ok) setFarmInfo(await farmRes.json());
+      if (notesRes.ok) setNotes(await notesRes.json());
     } catch (err) {
-      console.error("Error fetching cows:", err);
+      console.error("Error fetching data:", err);
     }
   };
 
@@ -49,7 +87,6 @@ export default function App() {
         if (liff.isLoggedIn()) {
           const lineProfile = await liff.getProfile();
           
-          // Sync with our backend
           const response = await fetch('/api/user/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -63,7 +100,7 @@ export default function App() {
           if (response.ok) {
             const userData = await response.json();
             setProfile(userData);
-            await fetchCows(lineProfile.userId);
+            await fetchData(lineProfile.userId);
           } else {
             setError("Failed to sync user data with server.");
           }
@@ -89,10 +126,7 @@ export default function App() {
       });
       if (res.ok) {
         setNewCowName('');
-        await fetchCows(profile.userId);
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to add cow");
+        await fetchData(profile.userId);
       }
     } catch (err) {
       console.error("Error adding cow:", err);
@@ -103,185 +137,241 @@ export default function App() {
     if (!profile) return;
     try {
       const res = await fetch(`/api/cows/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        await fetchCows(profile.userId);
-      }
+      if (res.ok) await fetchData(profile.userId);
     } catch (err) {
       console.error("Error deleting cow:", err);
     }
   };
 
-  const handleLogin = () => {
-    liff.login();
+  const handleDeleteTransaction = async (id: number) => {
+    if (!profile) return;
+    try {
+      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      if (res.ok) await fetchData(profile.userId);
+    } catch (err) {
+      console.error("Error deleting transaction:", err);
+    }
   };
 
-  const handleLogout = () => {
-    liff.logout();
-    window.location.reload();
+  const handleUpdateFarm = async () => {
+    if (!profile) return;
+    try {
+      const res = await fetch('/api/farm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile.userId, ...farmInfo })
+      });
+      if (res.ok) alert("บันทึกข้อมูลฟาร์มแล้ว");
+    } catch (err) {
+      console.error("Error updating farm:", err);
+    }
   };
+
+  const handleAddNote = async () => {
+    if (!newNote.title.trim() || !profile) return;
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile.userId, ...newNote })
+      });
+      if (res.ok) {
+        setNewNote({ title: '', content: '' });
+        await fetchData(profile.userId);
+      }
+    } catch (err) {
+      console.error("Error adding note:", err);
+    }
+  };
+
+  const handleDeleteNote = async (id: number) => {
+    if (!profile) return;
+    try {
+      const res = await fetch(`/api/notes/${id}`, { method: 'DELETE' });
+      if (res.ok) await fetchData(profile.userId);
+    } catch (err) {
+      console.error("Error deleting note:", err);
+    }
+  };
+
+  const handleLogin = () => liff.login();
+  const handleLogout = () => { liff.logout(); window.location.reload(); };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-orange-600 flex flex-col items-center justify-center p-6 text-white">
-        <div className="animate-bounce mb-4">
-          <Beef size={64} />
-        </div>
-        <p className="font-bold tracking-widest animate-pulse">LOADING KOSODSAI...</p>
+        <div className="animate-bounce mb-4"><Beef size={64} /></div>
+        <p className="font-bold tracking-widest animate-pulse uppercase">Loading KoSodsai...</p>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 font-sans">
-      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl shadow-orange-100/50 border border-gray-100 overflow-hidden">
-        {/* Header Section */}
-        <div className="bg-orange-500 p-8 text-white text-center relative">
-          <div className="absolute top-4 right-4 bg-white/20 p-2 rounded-full backdrop-blur-sm">
-            <ShieldCheck size={20} />
-          </div>
-          <div className="w-20 h-20 bg-white rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <Beef size={40} className="text-orange-500" />
-          </div>
-          <h1 className="text-3xl font-black tracking-tight">โคสดใส</h1>
-          <p className="text-orange-100 text-xs uppercase tracking-[0.2em] font-bold mt-1">LINE Native Farm Management</p>
-        </div>
+  const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
 
-        <div className="p-8">
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-xs font-medium text-center">
-              {error}
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center p-4 font-sans pb-24">
+      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl shadow-orange-100/50 border border-gray-100 overflow-hidden">
+        {/* Header */}
+        <div className="bg-orange-500 p-6 text-white text-center relative">
+          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-2 shadow-lg">
+            <Beef size={32} className="text-orange-500" />
+          </div>
+          <h1 className="text-2xl font-black tracking-tight">โคสดใส</h1>
+          {profile && (
+            <div className="flex items-center justify-center gap-2 mt-2">
+              <img src={profile.pictureUrl} className="w-6 h-6 rounded-full border border-white/50" referrerPolicy="no-referrer" />
+              <span className="text-xs font-bold">{profile.displayName}</span>
             </div>
           )}
+        </div>
+
+        <div className="p-6">
+          {error && <div className="mb-4 p-3 bg-red-50 text-red-600 text-xs rounded-xl text-center">{error}</div>}
 
           {!profile ? (
-            <div className="text-center py-4">
-              <p className="text-gray-500 text-sm mb-8 leading-relaxed">
-                ยินดีต้อนรับสู่ระบบจัดการฟาร์มวัวอัจฉริยะ<br/>
-                กรุณาเข้าสู่ระบบด้วย LINE เพื่อเริ่มใช้งาน
-              </p>
-              <button 
-                onClick={handleLogin}
-                className="w-full py-4 bg-[#06C755] text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-3 shadow-lg shadow-green-100 hover:brightness-95 transition-all active:scale-95"
-              >
-                <LogIn size={20} />
-                LOGIN WITH LINE
-              </button>
+            <div className="text-center py-8">
+              <p className="text-gray-500 text-sm mb-8">กรุณาเข้าสู่ระบบด้วย LINE เพื่อเริ่มใช้งาน</p>
+              <button onClick={handleLogin} className="w-full py-4 bg-[#06C755] text-white rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg"><LogIn size={20} /> LOGIN WITH LINE</button>
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Profile Card */}
-              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-3xl border border-gray-100">
-                <img 
-                  src={profile.pictureUrl || 'https://via.placeholder.com/150'} 
-                  alt={profile.displayName}
-                  className="w-16 h-16 rounded-2xl object-cover border-2 border-white shadow-sm"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="overflow-hidden">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Welcome back,</p>
-                  <h2 className="text-xl font-black text-gray-900 truncate">{profile.displayName}</h2>
+              {activeTab === 'dashboard' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-green-50 p-4 rounded-3xl border border-green-100">
+                      <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1">รายรับรวม</p>
+                      <p className="text-xl font-black text-green-700">฿{totalIncome.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-red-50 p-4 rounded-3xl border border-red-100">
+                      <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-1">รายจ่ายรวม</p>
+                      <p className="text-xl font-black text-red-700">฿{totalExpense.toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <div className="bg-orange-50 p-6 rounded-3xl border border-orange-100 text-center">
+                    <p className="text-xs font-bold text-orange-600 uppercase tracking-widest mb-1">กำไรสุทธิ</p>
+                    <p className="text-3xl font-black text-orange-700">฿{(totalIncome - totalExpense).toLocaleString()}</p>
+                  </div>
+                  <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100">
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">ข้อมูลผู้ใช้</h3>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs"><span className="text-gray-500">LINE ID:</span><span className="font-mono text-gray-700">{profile.userId.slice(0, 10)}...</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-gray-500">เข้าร่วมเมื่อ:</span><span className="font-bold text-gray-700">{new Date(profile.firstJoined).toLocaleDateString('th-TH')}</span></div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Cow Management Section */}
-              <div className="bg-white rounded-3xl border border-gray-100 p-5 shadow-sm">
-                <h3 className="text-sm font-black text-gray-900 mb-4 flex items-center gap-2">
-                  <Beef size={18} className="text-orange-500" />
-                  จัดการรายชื่อวัวของคุณ
-                </h3>
-                
-                <div className="flex gap-2 mb-4">
-                  <input 
-                    type="text" 
-                    value={newCowName}
-                    onChange={(e) => setNewCowName(e.target.value)}
-                    placeholder="ชื่อวัว..."
-                    className="flex-1 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-                  />
-                  <button 
-                    onClick={handleAddCow}
-                    className="bg-orange-500 text-white p-2 rounded-xl hover:bg-orange-600 transition-colors"
-                  >
-                    <Plus size={20} />
-                  </button>
+              {activeTab === 'transactions' && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-black flex items-center gap-2"><ListOrdered size={18} className="text-orange-500" /> ประวัติรายการ</h3>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                    {transactions.length === 0 ? <p className="text-center text-gray-400 text-xs py-8">ยังไม่มีรายการบันทึก</p> : 
+                      transactions.map(t => (
+                        <div key={t.id} className="p-3 bg-gray-50 rounded-2xl border border-gray-100 flex justify-between items-center">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${t.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                              <p className="text-sm font-bold text-gray-800">{t.category}</p>
+                            </div>
+                            <p className="text-[10px] text-gray-400 font-medium">{t.cowName} • {new Date(t.date).toLocaleDateString('th-TH')}</p>
+                          </div>
+                          <div className="text-right flex items-center gap-3">
+                            <p className={`text-sm font-black ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                              {t.type === 'income' ? '+' : '-'}฿{t.amount.toLocaleString()}
+                            </p>
+                            <button onClick={() => handleDeleteTransaction(t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                          </div>
+                        </div>
+                      ))
+                    }
+                  </div>
                 </div>
+              )}
 
-                <div className="space-y-2 max-h-[150px] overflow-y-auto pr-1">
-                  {cows.length === 0 ? (
-                    <p className="text-center text-gray-400 text-[10px] py-4 uppercase tracking-widest">ยังไม่มีรายชื่อวัว</p>
-                  ) : (
-                    cows.map(cow => (
-                      <div key={cow.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-50 group">
-                        <span className="text-sm font-bold text-gray-700">{cow.name}</span>
-                        <button 
-                          onClick={() => handleDeleteCow(cow.id)}
-                          className="text-gray-300 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+              {activeTab === 'cows' && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-black flex items-center gap-2"><Beef size={18} className="text-orange-500" /> จัดการรายชื่อวัว</h3>
+                  <div className="flex gap-2">
+                    <input type="text" value={newCowName} onChange={(e) => setNewCowName(e.target.value)} placeholder="ชื่อวัว..." className="flex-1 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" />
+                    <button onClick={handleAddCow} className="bg-orange-500 text-white p-2 rounded-xl"><Plus size={20} /></button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {cows.map(cow => (
+                      <div key={cow.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
+                        <span className="text-xs font-bold text-gray-700">{cow.name}</span>
+                        <button onClick={() => handleDeleteCow(cow.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Info Grid */}
-              <div className="grid grid-cols-1 gap-3">
-                <div className="flex items-center gap-3 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
-                  <div className="w-10 h-10 bg-blue-50 text-blue-500 rounded-xl flex items-center justify-center shrink-0">
-                    <UserIcon size={20} />
-                  </div>
-                  <div className="overflow-hidden">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">LINE User ID</p>
-                    <p className="text-xs font-mono text-gray-700 truncate">{profile.userId}</p>
+                    ))}
                   </div>
                 </div>
+              )}
 
-                <div className="flex items-center gap-3 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
-                  <div className="w-10 h-10 bg-green-50 text-green-500 rounded-xl flex items-center justify-center shrink-0">
-                    <Calendar size={20} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">First Joined</p>
-                    <p className="text-xs font-bold text-gray-700">
-                      {new Date(profile.firstJoined).toLocaleDateString('th-TH', { 
-                        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-                      })}
-                    </p>
+              {activeTab === 'farm' && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-black flex items-center gap-2"><Home size={18} className="text-orange-500" /> ข้อมูลฟาร์ม</h3>
+                  <div className="space-y-3">
+                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ชื่อฟาร์ม</label><input type="text" value={farmInfo.farmName} onChange={e => setFarmInfo({...farmInfo, farmName: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" /></div>
+                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">เจ้าของฟาร์ม</label><input type="text" value={farmInfo.ownerName} onChange={e => setFarmInfo({...farmInfo, ownerName: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" /></div>
+                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ที่ตั้ง</label><textarea value={farmInfo.location} onChange={e => setFarmInfo({...farmInfo, location: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm h-20" /></div>
+                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ติดต่อ</label><input type="text" value={farmInfo.contact} onChange={e => setFarmInfo({...farmInfo, contact: e.target.value})} className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm" /></div>
+                    <button onClick={handleUpdateFarm} className="w-full py-3 bg-orange-500 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg"><Save size={18} /> บันทึกข้อมูลฟาร์ม</button>
                   </div>
                 </div>
+              )}
 
-                <div className="flex items-center gap-3 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
-                  <div className="w-10 h-10 bg-purple-50 text-purple-500 rounded-xl flex items-center justify-center shrink-0">
-                    <Clock size={20} />
+              {activeTab === 'notes' && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-black flex items-center gap-2"><StickyNote size={18} className="text-orange-500" /> บันทึกอื่น ๆ</h3>
+                  <div className="bg-gray-50 p-4 rounded-3xl border border-gray-100 space-y-3">
+                    <input type="text" value={newNote.title} onChange={e => setNewNote({...newNote, title: e.target.value})} placeholder="หัวข้อ..." className="w-full bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm" />
+                    <textarea value={newNote.content} onChange={e => setNewNote({...newNote, content: e.target.value})} placeholder="รายละเอียด..." className="w-full bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm h-24" />
+                    <button onClick={handleAddNote} className="w-full py-2 bg-orange-500 text-white rounded-xl font-bold text-xs">เพิ่มบันทึก</button>
                   </div>
-                  <div>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Last Login</p>
-                    <p className="text-xs font-bold text-gray-700">
-                      {new Date(profile.lastLogin).toLocaleDateString('th-TH', { 
-                        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-                      })}
-                    </p>
+                  <div className="space-y-3">
+                    {notes.map(note => (
+                      <div key={note.id} className="p-4 bg-white rounded-2xl border border-gray-100 shadow-sm relative">
+                        <button onClick={() => handleDeleteNote(note.id)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500"><Trash2 size={16} /></button>
+                        <h4 className="text-sm font-black text-gray-800 pr-8">{note.title}</h4>
+                        <p className="text-xs text-gray-500 mt-1 whitespace-pre-wrap">{note.content}</p>
+                        <p className="text-[10px] text-gray-300 mt-2 font-bold uppercase">{new Date(note.date).toLocaleDateString('th-TH')}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </div>
+              )}
 
-              <button 
-                onClick={handleLogout}
-                className="w-full py-3 text-gray-400 text-[10px] font-bold uppercase tracking-[0.2em] hover:text-red-500 transition-colors"
-              >
-                Logout from System
-              </button>
+              <button onClick={handleLogout} className="w-full py-3 text-gray-400 text-[10px] font-bold uppercase tracking-[0.2em] hover:text-red-500 transition-colors">Logout from System</button>
             </div>
           )}
         </div>
-
-        <div className="p-6 bg-gray-50 border-t border-gray-100 text-center">
-          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em]">
-            Powered by TaibaanApp Team
-          </p>
-        </div>
       </div>
+
+      {/* Bottom Navigation */}
+      {profile && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 max-w-md w-[90%] bg-white/80 backdrop-blur-xl border border-white/50 rounded-[2rem] shadow-2xl p-2 flex justify-between items-center z-50">
+          <button onClick={() => setActiveTab('dashboard')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'dashboard' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
+            <LayoutDashboard size={20} />
+            <span className="text-[8px] font-bold mt-1 uppercase">หน้าแรก</span>
+          </button>
+          <button onClick={() => setActiveTab('transactions')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'transactions' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
+            <ListOrdered size={20} />
+            <span className="text-[8px] font-bold mt-1 uppercase">รายการ</span>
+          </button>
+          <button onClick={() => setActiveTab('cows')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'cows' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
+            <Beef size={20} />
+            <span className="text-[8px] font-bold mt-1 uppercase">วัว</span>
+          </button>
+          <button onClick={() => setActiveTab('farm')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'farm' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
+            <Home size={20} />
+            <span className="text-[8px] font-bold mt-1 uppercase">ฟาร์ม</span>
+          </button>
+          <button onClick={() => setActiveTab('notes')} className={`flex-1 flex flex-col items-center py-2 rounded-2xl transition-all ${activeTab === 'notes' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'text-gray-400'}`}>
+            <StickyNote size={20} />
+            <span className="text-[8px] font-bold mt-1 uppercase">บันทึก</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

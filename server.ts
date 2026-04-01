@@ -44,6 +44,23 @@ db.exec(`
     name TEXT,
     UNIQUE(userId, name)
   );
+
+  CREATE TABLE IF NOT EXISTS farm_info (
+    userId TEXT PRIMARY KEY,
+    farmName TEXT,
+    ownerName TEXT,
+    location TEXT,
+    contact TEXT,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId TEXT,
+    title TEXT,
+    content TEXT,
+    date DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // LINE config
@@ -162,6 +179,20 @@ async function startServer() {
     res.json(updatedUser);
   });
 
+  // Transactions API
+  app.get("/api/transactions", (req, res) => {
+    const userId = req.query.userId as string;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+    const transactions = db.prepare("SELECT * FROM transactions WHERE userId = ? ORDER BY date DESC").all(userId);
+    res.json(transactions);
+  });
+
+  app.delete("/api/transactions/:id", (req, res) => {
+    const { id } = req.params;
+    db.prepare("DELETE FROM transactions WHERE id = ?").run(id);
+    res.json({ success: true });
+  });
+
   // Cow Management API
   app.get("/api/cows", (req, res) => {
     const userId = req.query.userId as string;
@@ -184,6 +215,50 @@ async function startServer() {
   app.delete("/api/cows/:id", (req, res) => {
     const { id } = req.params;
     db.prepare("DELETE FROM cows WHERE id = ?").run(id);
+    res.json({ success: true });
+  });
+
+  // Farm Info API
+  app.get("/api/farm", (req, res) => {
+    const userId = req.query.userId as string;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+    const farm = db.prepare("SELECT * FROM farm_info WHERE userId = ?").get(userId);
+    res.json(farm || { farmName: "", ownerName: "", location: "", contact: "" });
+  });
+
+  app.post("/api/farm", (req, res) => {
+    const { userId, farmName, ownerName, location, contact } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+    
+    const existing = db.prepare("SELECT userId FROM farm_info WHERE userId = ?").get(userId);
+    if (existing) {
+      db.prepare("UPDATE farm_info SET farmName = ?, ownerName = ?, location = ?, contact = ?, updatedAt = CURRENT_TIMESTAMP WHERE userId = ?")
+        .run(farmName, ownerName, location, contact, userId);
+    } else {
+      db.prepare("INSERT INTO farm_info (userId, farmName, ownerName, location, contact) VALUES (?, ?, ?, ?, ?)")
+        .run(userId, farmName, ownerName, location, contact);
+    }
+    res.json({ success: true });
+  });
+
+  // Notes API
+  app.get("/api/notes", (req, res) => {
+    const userId = req.query.userId as string;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+    const notes = db.prepare("SELECT * FROM notes WHERE userId = ? ORDER BY date DESC").all(userId);
+    res.json(notes);
+  });
+
+  app.post("/api/notes", (req, res) => {
+    const { userId, title, content } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+    db.prepare("INSERT INTO notes (userId, title, content) VALUES (?, ?, ?)").run(userId, title, content);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/notes/:id", (req, res) => {
+    const { id } = req.params;
+    db.prepare("DELETE FROM notes WHERE id = ?").run(id);
     res.json({ success: true });
   });
 
