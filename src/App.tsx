@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import liff from '@line/liff';
-import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck } from 'lucide-react';
+import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2 } from 'lucide-react';
 
 interface UserProfile {
   userId: string;
@@ -10,10 +10,29 @@ interface UserProfile {
   lastLogin: string;
 }
 
+interface Cow {
+  id: number;
+  name: string;
+}
+
 export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [cows, setCows] = useState<Cow[]>([]);
+  const [newCowName, setNewCowName] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const fetchCows = async (userId: string) => {
+    try {
+      const res = await fetch(`/api/cows?userId=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCows(data);
+      }
+    } catch (err) {
+      console.error("Error fetching cows:", err);
+    }
+  };
 
   useEffect(() => {
     const initLiff = async () => {
@@ -44,6 +63,7 @@ export default function App() {
           if (response.ok) {
             const userData = await response.json();
             setProfile(userData);
+            await fetchCows(lineProfile.userId);
           } else {
             setError("Failed to sync user data with server.");
           }
@@ -58,6 +78,38 @@ export default function App() {
 
     initLiff();
   }, []);
+
+  const handleAddCow = async () => {
+    if (!newCowName.trim() || !profile) return;
+    try {
+      const res = await fetch('/api/cows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile.userId, name: newCowName.trim() })
+      });
+      if (res.ok) {
+        setNewCowName('');
+        await fetchCows(profile.userId);
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to add cow");
+      }
+    } catch (err) {
+      console.error("Error adding cow:", err);
+    }
+  };
+
+  const handleDeleteCow = async (id: number) => {
+    if (!profile) return;
+    try {
+      const res = await fetch(`/api/cows/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await fetchCows(profile.userId);
+      }
+    } catch (err) {
+      console.error("Error deleting cow:", err);
+    }
+  };
 
   const handleLogin = () => {
     liff.login();
@@ -131,15 +183,57 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Cow Management Section */}
+              <div className="bg-white rounded-3xl border border-gray-100 p-5 shadow-sm">
+                <h3 className="text-sm font-black text-gray-900 mb-4 flex items-center gap-2">
+                  <Beef size={18} className="text-orange-500" />
+                  จัดการรายชื่อวัวของคุณ
+                </h3>
+                
+                <div className="flex gap-2 mb-4">
+                  <input 
+                    type="text" 
+                    value={newCowName}
+                    onChange={(e) => setNewCowName(e.target.value)}
+                    placeholder="ชื่อวัว..."
+                    className="flex-1 bg-gray-50 border border-gray-100 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                  />
+                  <button 
+                    onClick={handleAddCow}
+                    className="bg-orange-500 text-white p-2 rounded-xl hover:bg-orange-600 transition-colors"
+                  >
+                    <Plus size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-[150px] overflow-y-auto pr-1">
+                  {cows.length === 0 ? (
+                    <p className="text-center text-gray-400 text-[10px] py-4 uppercase tracking-widest">ยังไม่มีรายชื่อวัว</p>
+                  ) : (
+                    cows.map(cow => (
+                      <div key={cow.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-50 group">
+                        <span className="text-sm font-bold text-gray-700">{cow.name}</span>
+                        <button 
+                          onClick={() => handleDeleteCow(cow.id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
               {/* Info Grid */}
               <div className="grid grid-cols-1 gap-3">
                 <div className="flex items-center gap-3 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
                   <div className="w-10 h-10 bg-blue-50 text-blue-500 rounded-xl flex items-center justify-center shrink-0">
                     <UserIcon size={20} />
                   </div>
-                  <div>
+                  <div className="overflow-hidden">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">LINE User ID</p>
-                    <p className="text-xs font-mono text-gray-700 truncate max-w-[200px]">{profile.userId}</p>
+                    <p className="text-xs font-mono text-gray-700 truncate">{profile.userId}</p>
                   </div>
                 </div>
 
