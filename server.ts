@@ -14,7 +14,7 @@ import { createTransactionFlexMessage } from "./flexMessages";
 dotenv.config();
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-const model = "gemini-3-flash-preview"; // Recommended Flash model
+const model = "gemini-1.5-flash-latest"; // User requested 1.5 Flash, and it's very stable for JSON mode
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,15 +134,35 @@ async function parseWithAI(text: string, userId: string) {
   - ในช่อง "note" ให้สรุปสั้นๆ ว่าเป็นค่าอะไร (เช่น "ค่ามะนาว", "ขายขี้วัว")
   - หากเป็นคำทักทายหรือคำพูดทั่วไป: ให้ตอบกลับในช่อง "reply" อย่างสุภาพและเป็นกันเอง
   - หากข้อความคลุมเครือหรือไม่ชัดเจน: ให้ถามกลับหรือแนะนำวิธีพิมพ์ในช่อง "reply"
-  - **สำคัญ**: หากไม่มีรายการเงิน ให้ส่ง "transactions" เป็น Array ว่าง [] และต้องมี "reply" เสมอ
-  
-  ตอบกลับเป็น JSON Object เท่านั้น:
-  {
-    "transactions": [{"type": "income/expense", "category": "ชื่อหมวดหมู่", "amount": 100, "cowName": "ชื่อวัว", "note": "สรุปสั้นๆ"}],
-    "reply": "ข้อความตอบกลับผู้ใช้"
-  }`;
+  - **สำคัญ**: หากไม่มีรายการเงิน ให้ส่ง "transactions" เป็น Array ว่าง [] และต้องมี "reply" เสมอ`;
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      transactions: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            type: { type: Type.STRING, enum: ["income", "expense"] },
+            category: { type: Type.STRING },
+            amount: { type: Type.NUMBER },
+            cowName: { type: Type.STRING },
+            note: { type: Type.STRING }
+          },
+          required: ["type", "category", "amount", "cowName", "note"]
+        }
+      },
+      reply: { type: Type.STRING }
+    },
+    required: ["transactions", "reply"]
+  };
 
   try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not set in environment variables.");
+    }
+
     console.log(`AI Parsing (Real-time) for user ${userId}: "${text}"`);
     const result = await ai.models.generateContent({
       model: model,
@@ -150,6 +170,7 @@ async function parseWithAI(text: string, userId: string) {
       config: {
         systemInstruction,
         responseMimeType: "application/json",
+        responseSchema,
       },
     });
 
@@ -170,7 +191,11 @@ async function parseWithAI(text: string, userId: string) {
     return { transactions, reply, usage: usage?.totalTokenCount || 0 };
   } catch (err) {
     console.error("AI Parsing Error:", err);
-    return { transactions: [], reply: "ขออภัยครับ ระบบประมวลผลขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้งครับ", usage: 0 };
+    let errorMsg = "ขออภัยครับ ระบบประมวลผลขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้งครับ";
+    if (err instanceof Error && err.message.includes("API_KEY")) {
+      errorMsg = "ระบบยังไม่ได้ตั้งค่า API Key ครับ รบกวนแจ้งแอดมินด้วยนะครับ";
+    }
+    return { transactions: [], reply: errorMsg, usage: 0 };
   }
 }
 
@@ -218,22 +243,51 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
   กฎการทำงาน:
   1. คุณจะได้รับรายการข้อความจากผู้ใช้หลายคน
   2. สำหรับแต่ละข้อความ ให้ระบุรายการเงิน (transactions) หรือข้อความตอบกลับ (reply)
-  3. หากเป็นรายการเงิน: ระบุประเภท, หมวดหมู่, จำนวนเงิน, ชื่อวัว, และบันทึกสั้นๆ
-  4. หากเป็นคำทักทายหรือคุยทั่วไป: ใส่ข้อความตอบกลับในช่อง "reply"
-  
-  ตอบกลับเป็น JSON Array ของออบเจกต์:
-  [{"originalId": 1, "userId": "user1", "transactions": [...], "reply": "สวัสดีครับ"}]`;
+  3. หากเป็นรายการเงิน: ระบุประเภท, หมวดหมู่, จำนวนเงิน, ชื่อวัว, และบันทึกสั้นๆ (เช่น "ค่าหมา", "ขายมะนาว", "ซื้อกระสอบ")
+  4. หากเป็นคำทักทายหรือคุยทั่วไป: ใส่ข้อความตอบกลับในช่อง "reply"`;
+
+  const responseSchema = {
+    type: Type.ARRAY,
+    items: {
+      type: Type.OBJECT,
+      properties: {
+        originalId: { type: Type.NUMBER },
+        userId: { type: Type.STRING },
+        transactions: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              type: { type: Type.STRING, enum: ["income", "expense"] },
+              category: { type: Type.STRING },
+              amount: { type: Type.NUMBER },
+              cowName: { type: Type.STRING },
+              note: { type: Type.STRING }
+            },
+            required: ["type", "category", "amount", "cowName", "note"]
+          }
+        },
+        reply: { type: Type.STRING }
+      },
+      required: ["originalId", "userId", "transactions", "reply"]
+    }
+  };
 
   const prompt = messages.map(m => `ID: ${m.id}, User: ${m.userId}, Cows: ${userContexts[m.userId]}, Text: "${m.text}"`).join("\n");
 
   try {
-    console.log(`Processing batch of ${messages.length} messages...`);
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not set.");
+    }
+
+    console.log(`Processing batch of ${messages.length} messages using ${model}...`);
     const result = await ai.models.generateContent({
       model: model,
       contents: [{ parts: [{ text: prompt }] }],
       config: {
         systemInstruction,
         responseMimeType: "application/json",
+        responseSchema,
       },
     });
 
@@ -266,6 +320,26 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
       }
 
       // Reply to user
+      const sendReply = async (msg: any) => {
+        try {
+          await client.replyMessage({
+            replyToken: original.replyToken,
+            messages: [msg],
+          });
+        } catch (err) {
+          // If replyToken expired or already used, use pushMessage
+          console.log(`ReplyToken failed for user ${original.userId}, trying pushMessage...`);
+          try {
+            await client.pushMessage({
+              to: original.userId,
+              messages: [msg],
+            });
+          } catch (pushErr) {
+            console.error("Error sending push message in batch", pushErr);
+          }
+        }
+      };
+
       if (transactions.length > 0) {
         const summary = transactions.map((t: any, i: number) => {
           const typeLabel = t.type === "income" ? "🟢 รับ" : "🔴 จ่าย";
@@ -286,20 +360,11 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
           savedIds.length === 1
         );
 
-        client.replyMessage({
-          replyToken: original.replyToken,
-          messages: [flexMessage as any],
-        }).catch(err => console.error("Error replying to batch message", err));
+        sendReply(flexMessage as any);
       } else if (res.reply) {
-        client.replyMessage({
-          replyToken: original.replyToken,
-          messages: [{ type: "text", text: res.reply } as any],
-        }).catch(err => console.error("Error replying to batch message (reply)", err));
+        sendReply({ type: "text", text: res.reply } as any);
       } else {
-        client.replyMessage({
-          replyToken: original.replyToken,
-          messages: [{ type: "text", text: "ขออภัยครับ ผมไม่เข้าใจรายการนี้ รบกวนระบุรายละเอียดอีกครั้งครับ" } as any],
-        }).catch(err => console.error("Error replying to batch message (fail)", err));
+        sendReply({ type: "text", text: "ขออภัยครับ ผมไม่เข้าใจรายการนี้ รบกวนระบุรายละเอียดอีกครั้งครับ" } as any);
       }
     }
 
@@ -643,13 +708,15 @@ async function handleEvent(event: any) {
         VALUES (?, ?, ?)
       `).run(userId, event.replyToken, userMessage);
       
+      let batchReply = "ระบบกำลังประมวลผลรายการของคุณแบบคิว (Batch) เพื่อความประหยัดและรวดเร็วในภาพรวมครับ รอสักครู่นะครับ";
       if (dailyCount.count >= 30) {
-        return client.replyMessage({
-          replyToken: event.replyToken,
-          messages: [{ type: "text", text: "คุณใช้งานเกิน 30 รายการ ระบบกำลังประมวลผลแบบคิวเพื่อประหยัดพลังงาน อาจจะล่าช้าเล็กน้อยครับ (จำกัด 50 รายการต่อวัน)" } as any],
-        });
+        batchReply = "คุณใช้งานเกิน 30 รายการ ระบบกำลังประมวลผลแบบคิวเพื่อประหยัดพลังงาน อาจจะล่าช้าเล็กน้อยครับ (จำกัด 50 รายการต่อวัน)";
       }
-      return Promise.resolve(null);
+      
+      return client.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: "text", text: batchReply } as any],
+      });
     } else {
       // Real-time AI Inference
       const aiResult = await parseWithAI(userMessage, userId);

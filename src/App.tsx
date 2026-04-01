@@ -290,6 +290,17 @@ export default function App() {
             <div className="space-y-6">
               {activeTab === 'dashboard' && (
                 <div className="space-y-4">
+                  {profile?.isAdmin === 1 && (
+                    <div className="flex justify-end">
+                      <button 
+                        onClick={() => setShowAdmin(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-orange-100 text-orange-600 rounded-2xl font-bold text-[10px] hover:bg-orange-200 transition-colors uppercase tracking-widest"
+                      >
+                        <LayoutDashboard size={14} />
+                        Admin Dashboard
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-green-50 p-4 rounded-3xl border border-green-100 overflow-hidden">
                       <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1 truncate">รายรับรวม</p>
@@ -490,6 +501,10 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {showAdmin && profile && (
+        <AdminDashboard userId={profile.userId} onClose={() => setShowAdmin(false)} />
+      )}
 
       {showAdmin && profile && (
         <AdminDashboard userId={profile.userId} onClose={() => setShowAdmin(false)} />
