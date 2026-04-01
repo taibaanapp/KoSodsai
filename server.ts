@@ -5,35 +5,11 @@ import { fileURLToPath } from "url";
 import cors from "cors";
 import dotenv from "dotenv";
 import * as line from "@line/bot-sdk";
-import { GoogleGenAI } from "@google/genai";
-import * as admin from "firebase-admin";
-import fs from "fs";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Initialize Firebase Admin (Optional)
-const firebaseConfigFile = path.join(process.cwd(), 'firebase-applet-config.json');
-let db: any = null;
-
-if (fs.existsSync(firebaseConfigFile)) {
-  try {
-    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigFile, 'utf8'));
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        projectId: firebaseConfig.projectId,
-      });
-    }
-    db = admin.firestore();
-    console.log("Firebase Admin initialized successfully");
-  } catch (err) {
-    console.error("Failed to initialize Firebase Admin:", err);
-  }
-} else {
-  console.log("Firebase config not found, skipping Firestore initialization");
-}
 
 // LINE config
 const lineConfig = {
@@ -44,9 +20,6 @@ const lineConfig = {
 const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: lineConfig.channelAccessToken,
 });
-
-// Gemini AI config
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 async function startServer() {
   const app = express();
@@ -70,7 +43,7 @@ async function startServer() {
     Promise.all(req.body.events.map(handleEvent))
       .then((result) => res.json(result))
       .catch((err) => {
-        console.error(err);
+        console.error("Webhook Error:", err);
         res.status(500).end();
       });
   });
@@ -80,20 +53,6 @@ async function startServer() {
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", message: "KoSodsai API is running" });
-  });
-
-  // AI processing endpoint
-  app.post("/api/ai/process", async (req, res) => {
-    const { message } = req.body;
-    try {
-      const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [{ text: message }] }],
-      });
-      res.json({ result: response.text });
-    } catch (error) {
-      res.status(500).json({ error: "AI processing failed" });
-    }
   });
 
   // Vite middleware for development
@@ -123,6 +82,8 @@ async function handleEvent(event: any) {
 
   const userMessage = event.message.text;
   const replyText = `คุณส่งข้อความว่า: "${userMessage}"`;
+
+  console.log(`Replying to ${event.replyToken} with: ${replyText}`);
 
   return client.replyMessage({
     replyToken: event.replyToken,
