@@ -45,7 +45,7 @@ async function startServer() {
 
   app.use(cors());
 
-  // LINE Webhook (must be before express.json() for signature verification)
+  // LINE Webhook (must be before express.json() for signature verification) u
   app.get("/api/webhook", (req, res) => {
     res.send("LINE Webhook endpoint is active. Please use POST for actual webhooks.");
   });
