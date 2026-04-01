@@ -49,28 +49,50 @@ export default function App() {
       const liffInstance = await initLiff();
       if (liffInstance) {
         setIsLiffReady(true);
-        const profile = await liffInstance.getProfile();
-        setUser({
-          id: profile.userId,
-          displayName: profile.displayName,
-          pictureUrl: profile.pictureUrl,
-        });
+        if (liffInstance.isLoggedIn()) {
+          try {
+            const profile = await liffInstance.getProfile();
+            setUser({
+              id: profile.userId,
+              displayName: profile.displayName,
+              pictureUrl: profile.pictureUrl,
+            });
+          } catch (err) {
+            console.error("LIFF getProfile error", err);
+          }
+        }
       }
     };
     setupLiff();
   }, []);
 
-  // 2. Initialize Firebase Auth (Anonymous for now to satisfy rules)
+  // 2. Initialize Firebase Auth
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setIsAuthReady(true);
       } else {
-        signInAnonymously(auth).catch(err => console.error("Auth error", err));
+        // If not logged in, we'll wait for user action or try to sign in anonymously
+        // But if it's restricted, we'll just log it.
+        signInAnonymously(auth).catch(err => {
+          if (err.code === 'auth/admin-restricted-operation') {
+            console.warn("Anonymous Auth is disabled. Please enable it in Firebase Console.");
+          } else {
+            console.error("Auth error", err);
+          }
+        });
       }
     });
     return () => unsubscribe();
   }, []);
+
+  const handleLineLogin = () => {
+    import('@line/liff').then(liff => {
+      if (!liff.default.isLoggedIn()) {
+        liff.default.login();
+      }
+    });
+  };
 
   // 3. Sync User Profile to Firestore
   useEffect(() => {
@@ -189,7 +211,7 @@ export default function App() {
           <h2 className="text-2xl font-black text-gray-900 mb-2">ยินดีต้อนรับสู่ โคสดใส</h2>
           <p className="text-xs text-gray-500 mb-8">กรุณาเข้าสู่ระบบผ่าน LINE เพื่อเริ่มจัดการฟาร์มของคุณ</p>
           <button 
-            onClick={() => window.location.reload()}
+            onClick={handleLineLogin}
             className="w-full py-4 bg-[#06C755] text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-3 shadow-lg shadow-green-100 hover:brightness-95 transition-all active:scale-95"
           >
             <LogIn size={20} />

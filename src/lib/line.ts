@@ -9,10 +9,13 @@ export const initLiff = async () => {
 
   try {
     await liff.init({ liffId });
-    if (!liff.isLoggedIn()) {
-      liff.login();
+    if (liff.isLoggedIn()) {
+      return liff;
+    } else {
+      // In some environments, auto-login might be blocked.
+      // We'll let the UI handle the login button if needed.
+      return liff;
     }
-    return liff;
   } catch (error) {
     console.error('LIFF initialization failed', error);
     return null;
@@ -21,7 +24,12 @@ export const initLiff = async () => {
 
 export const getProfile = async () => {
   if (!liff.isLoggedIn()) return null;
-  return await liff.getProfile();
+  try {
+    return await liff.getProfile();
+  } catch (error) {
+    console.error('Failed to get LIFF profile', error);
+    return null;
+  }
 };
 
 export const logout = () => {
