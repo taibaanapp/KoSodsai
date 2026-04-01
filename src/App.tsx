@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import liff from '@line/liff';
-import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2, LayoutDashboard, ListOrdered, Home, StickyNote, Save, Sparkles } from 'lucide-react';
+import { Beef, LogIn, User as UserIcon, Calendar, Clock, ShieldCheck, Plus, Trash2, LayoutDashboard, ListOrdered, Home, StickyNote, Save, Sparkles, Settings } from 'lucide-react';
+import AdminDashboard from './components/AdminDashboard';
 
 interface UserProfile {
   userId: string;
@@ -8,6 +9,7 @@ interface UserProfile {
   pictureUrl: string;
   firstJoined: string;
   lastLogin: string;
+  isAdmin: number;
 }
 
 interface Cow {
@@ -50,6 +52,7 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [aiUsage, setAiUsage] = useState<number>(0);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [showAdmin, setShowAdmin] = useState(false);
   
   const [newCowName, setNewCowName] = useState('');
   const [newNote, setNewNote] = useState({ title: '', content: '' });
@@ -93,6 +96,7 @@ export default function App() {
         
         if (liff.isLoggedIn()) {
           const lineProfile = await liff.getProfile();
+          const userEmail = liff.getDecodedIDToken()?.email;
           
           const response = await fetch('/api/user/sync', {
             method: 'POST',
@@ -100,7 +104,8 @@ export default function App() {
             body: JSON.stringify({
               userId: lineProfile.userId,
               displayName: lineProfile.displayName,
-              pictureUrl: lineProfile.pictureUrl
+              pictureUrl: lineProfile.pictureUrl,
+              email: userEmail
             })
           });
 
@@ -406,10 +411,24 @@ export default function App() {
               )}
 
               <button onClick={handleLogout} className="w-full py-3 text-gray-400 text-[10px] font-bold uppercase tracking-[0.2em] hover:text-red-500 transition-colors">Logout from System</button>
+              
+              {profile?.isAdmin === 1 && (
+                <button 
+                  onClick={() => setShowAdmin(true)} 
+                  className="w-full mt-4 py-4 bg-gray-900 text-white rounded-2xl flex items-center justify-center gap-3 font-bold hover:bg-black transition-all"
+                >
+                  <Settings size={20} />
+                  <span>Admin Dashboard</span>
+                </button>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      {showAdmin && profile && (
+        <AdminDashboard userId={profile.userId} onClose={() => setShowAdmin(false)} />
+      )}
 
       {/* Edit Transaction Modal */}
       {editingTransaction && (

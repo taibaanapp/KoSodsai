@@ -14,7 +14,7 @@ import { createTransactionFlexMessage } from "./flexMessages";
 dotenv.config();
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-const model = "gemini-2.0-flash-exp"; // Using Flash for speed and accuracy
+const model = "gemini-3-flash-preview"; // Recommended Flash model
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,8 +26,10 @@ db.exec(`
     userId TEXT PRIMARY KEY,
     displayName TEXT,
     pictureUrl TEXT,
+    email TEXT,
     firstJoined DATETIME DEFAULT CURRENT_TIMESTAMP,
-    lastLogin DATETIME DEFAULT CURRENT_TIMESTAMP
+    lastLogin DATETIME DEFAULT CURRENT_TIMESTAMP,
+    isAdmin INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS transactions (
@@ -73,34 +75,27 @@ db.exec(`
     tokensPrompt INTEGER,
     tokensResponse INTEGER,
     tokensTotal INTEGER,
-    date DATETIME DEFAULT CURRENT_TIMESTAMP
+    date DATE DEFAULT (DATE('now')),
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS pending_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId TEXT,
+    replyToken TEXT,
+    text TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
 
-// LINE config
-const lineConfig = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || "",
-  channelSecret: process.env.LINE_CHANNEL_SECRET || "",
-};
+// Set default admin
+const adminEmail = "akkaluck@gmail.com";
 
-const client = new line.messagingApi.MessagingApiClient({
-  channelAccessToken: lineConfig.channelAccessToken,
-});
-
-// Load Keywords
-let masterData: any = { categories: [], cows: [], synonyms: {} };
-try {
-  const data = fs.readFileSync("./keywords.json", "utf-8");
-  masterData = JSON.parse(data);
-} catch (err) {
-  console.error("Error loading keywords.json", err);
-}
-
-// Setup Fuse.js for fuzzy matching (No longer used in local parsing, but kept for reference if needed)
-// const allKeywords = masterData.categories.flatMap((cat: any) => 
-//   cat.keywords.map((kw: string) => ({ word: kw, categoryId: cat.id, type: cat.type, label: cat.label }))
-// );
-// const fuse = new Fuse(allKeywords, { keys: ["word"], threshold: 0.4 });
+// Traffic monitoring
+let recentMessageCount = 0;
+setInterval(() => {
+  recentMessageCount = 0; // Reset every minute
+}, 60000);
 
 async function parseWithAI(text: string, userId: string) {
   const userCows = db.prepare("SELECT name FROM cows WHERE userId = ?").all(userId) as { name: string }[];
@@ -143,6 +138,145 @@ async function parseWithAI(text: string, userId: string) {
     return { transactions: [], usage: 0 };
   }
 }
+
+// LINE config
+const lineConfig = {
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || "",
+  channelSecret: process.env.LINE_CHANNEL_SECRET || "",
+};
+
+const client = new line.messagingApi.MessagingApiClient({
+  channelAccessToken: lineConfig.channelAccessToken,
+});
+
+// Load Keywords
+let masterData: any = { categories: [], cows: [], synonyms: {} };
+try {
+  const data = fs.readFileSync("./keywords.json", "utf-8");
+  masterData = JSON.parse(data);
+} catch (err) {
+  console.error("Error loading keywords.json", err);
+}
+
+// Setup Fuse.js for fuzzy matching (No longer used in local parsing, but kept for reference if needed)
+// const allKeywords = masterData.categories.flatMap((cat: any) => 
+//   cat.keywords.map((kw: string) => ({ word: kw, categoryId: cat.id, type: cat.type, label: cat.label }))
+// );
+// const fuse = new Fuse(allKeywords, { keys: ["word"], threshold: 0.4 });
+
+async function parseBatchWithAI(messages: { id: number, text: string, userId: string, replyToken: string }[]) {
+  if (messages.length === 0) return;
+
+  // Group by user to get their cow lists
+  const userIds = [...new Set(messages.map(m => m.userId))];
+  const userContexts: Record<string, string> = {};
+  for (const uid of userIds) {
+    const userCows = db.prepare("SELECT name FROM cows WHERE userId = ?").all(uid) as { name: string }[];
+    userContexts[uid] = userCows.map(c => c.name).join(", ") || "ไม่มีข้อมูล (ให้ใช้ 'โดยรวม')";
+  }
+
+  const systemInstruction = `คุณคือผู้ช่วยจัดการฟาร์มวัว หน้าที่ของคุณคือตีความข้อความรายรับ-รายจ่าย
+  ข้อมูลหมวดหมู่ที่มี: ${JSON.stringify(masterData.categories)}
+  
+  กฎการทำงาน:
+  1. คุณจะได้รับรายการข้อความจากผู้ใช้หลายคน
+  2. สำหรับแต่ละข้อความ ให้ระบุประเภท (income/expense), หมวดหมู่ (label), จำนวนเงิน (amount), ชื่อวัว (cowName), และบันทึก (note)
+  3. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
+  4. ตอบกลับเป็น JSON Array ของออบเจกต์ โดยแต่ละออบเจกต์ต้องมี "originalId" (จาก input) และ "transactions" (Array ของรายการที่ตีความได้)
+  
+  โครงสร้างคำตอบ:
+  [{"originalId": 1, "userId": "user1", "transactions": [{"type": "income", "category": "ขายวัว", "amount": 50000, "cowName": "แดง", "note": "ขายวัวแดง"}]}]`;
+
+  const prompt = messages.map(m => `ID: ${m.id}, User: ${m.userId}, Cows: ${userContexts[m.userId]}, Text: "${m.text}"`).join("\n");
+
+  try {
+    const result = await ai.models.generateContent({
+      model: model,
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+      },
+    });
+
+    const batchResults = JSON.parse(result.text || "[]");
+    const usage = result.usageMetadata;
+
+    if (usage) {
+      // Log usage for the admin (or split among users, but for batching we'll log it as a system entry)
+      db.prepare(`
+        INSERT INTO ai_usage (userId, tokensPrompt, tokensResponse, tokensTotal)
+        VALUES (?, ?, ?, ?)
+      `).run("system_batch", usage.promptTokenCount, usage.candidatesTokenCount, usage.totalTokenCount);
+    }
+
+    for (const res of batchResults) {
+      const original = messages.find(m => m.id === res.originalId);
+      if (!original) continue;
+
+      const savedIds: number[] = [];
+      for (const t of res.transactions) {
+        try {
+          const insertResult = db.prepare(`
+            INSERT INTO transactions (userId, type, category, amount, note, cowName, rawText)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(original.userId, t.type, t.category, t.amount, t.note || original.text, t.cowName, original.text);
+          savedIds.push(insertResult.lastInsertRowid as number);
+        } catch (err) {
+          console.error("Error saving batch transaction", err);
+        }
+      }
+
+      // Reply to user
+      if (res.transactions.length > 0) {
+        const summary = res.transactions.map((t: any, i: number) => {
+          const typeLabel = t.type === "income" ? "🟢 รับ" : "🔴 จ่าย";
+          return `${i + 1}. ${t.category} (${t.cowName}): ${typeLabel} ฿${t.amount.toLocaleString()}`;
+        }).join("\n");
+
+        const liffId = process.env.VITE_LIFF_ID;
+        const baseUrl = liffId ? `https://liff.line.me/${liffId}` : "https://line.me";
+        const editUrl = savedIds.length === 1 
+          ? `${baseUrl}?tid=${savedIds[0]}`
+          : `${baseUrl}?tab=transactions`;
+
+        const flexMessage = createTransactionFlexMessage(
+          summary, 
+          editUrl, 
+          true, 
+          Math.round((usage?.totalTokenCount || 0) / messages.length), // Estimated per message
+          savedIds.length === 1
+        );
+
+        client.replyMessage({
+          replyToken: original.replyToken,
+          messages: [flexMessage as any],
+        }).catch(err => console.error("Error replying to batch message", err));
+      } else {
+        client.replyMessage({
+          replyToken: original.replyToken,
+          messages: [{ type: "text", text: "ขออภัยครับ ผมไม่เข้าใจรายการนี้ รบกวนระบุรายละเอียดอีกครั้งครับ" } as any],
+        }).catch(err => console.error("Error replying to batch message (fail)", err));
+      }
+    }
+
+    // Clear pending messages
+    const ids = messages.map(m => m.id);
+    db.prepare(`DELETE FROM pending_messages WHERE id IN (${ids.join(",")})`).run();
+
+  } catch (err) {
+    console.error("Batch AI Parsing Error:", err);
+  }
+}
+
+// Background job for batch processing
+setInterval(() => {
+  const pending = db.prepare("SELECT * FROM pending_messages LIMIT 20").all() as any[];
+  if (pending.length > 0) {
+    console.log(`Processing batch of ${pending.length} messages...`);
+    parseBatchWithAI(pending);
+  }
+}, 15000); // Every 15 seconds
 
 function parseMessageLocal(text: string, userId: string) {
   const result: any = {
@@ -238,17 +372,18 @@ async function startServer() {
 
   // Auth/User API
   app.post("/api/user/sync", (req, res) => {
-    const { userId, displayName, pictureUrl } = req.body;
+    const { userId, displayName, pictureUrl, email } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
     const user = db.prepare("SELECT * FROM users WHERE userId = ?").get(userId) as any;
+    const isAdmin = email === adminEmail ? 1 : 0;
     
     if (user) {
-      db.prepare("UPDATE users SET lastLogin = CURRENT_TIMESTAMP, displayName = ?, pictureUrl = ? WHERE userId = ?")
-        .run(displayName, pictureUrl, userId);
+      db.prepare("UPDATE users SET lastLogin = CURRENT_TIMESTAMP, displayName = ?, pictureUrl = ?, email = ?, isAdmin = ? WHERE userId = ?")
+        .run(displayName, pictureUrl, email, isAdmin || user.isAdmin, userId);
     } else {
-      db.prepare("INSERT INTO users (userId, displayName, pictureUrl) VALUES (?, ?, ?)")
-        .run(userId, displayName, pictureUrl);
+      db.prepare("INSERT INTO users (userId, displayName, pictureUrl, email, isAdmin) VALUES (?, ?, ?, ?, ?)")
+        .run(userId, displayName, pictureUrl, email, isAdmin);
     }
 
     const updatedUser = db.prepare("SELECT * FROM users WHERE userId = ?").get(userId);
@@ -368,6 +503,34 @@ async function startServer() {
     res.json({ total: usage.total || 0 });
   });
 
+  // Admin Stats API
+  app.get("/api/admin/stats", (req, res) => {
+    const userId = req.query.userId as string;
+    // Simple admin check: check if user exists and has isAdmin = 1
+    const user = db.prepare("SELECT isAdmin FROM users WHERE userId = ?").get(userId) as { isAdmin: number };
+    if (!user || user.isAdmin !== 1) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    const dailyStats = db.prepare(`
+      SELECT 
+        date, 
+        COUNT(DISTINCT userId) as activeUsers,
+        SUM(tokensTotal) as totalTokens,
+        SUM(tokensPrompt) as promptTokens,
+        SUM(tokensResponse) as responseTokens
+      FROM ai_usage 
+      GROUP BY date 
+      ORDER BY date DESC 
+      LIMIT 30
+    `).all();
+
+    const totalUsers = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
+    const totalTransactions = db.prepare("SELECT COUNT(*) as count FROM transactions").get() as { count: number };
+
+    res.json({ dailyStats, totalUsers: totalUsers.count, totalTransactions: totalTransactions.count });
+  });
+
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", message: "KoSodsai API is running" });
@@ -401,25 +564,58 @@ async function handleEvent(event: any) {
   const userId = event.source.userId;
   const userMessage = event.message.text;
 
+  // Quota Check
+  const today = new Date().toISOString().split('T')[0];
+  const dailyCount = db.prepare("SELECT COUNT(*) as count FROM ai_usage WHERE userId = ? AND date = ?").get(userId, today) as { count: number };
+  
+  if (dailyCount.count >= 50) {
+    return client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: "text", text: "ขออภัยครับ คุณใช้งานเกินโควต้า 50 รายการต่อวันแล้ว รบกวนลองใหม่พรุ่งนี้นะครับ" } as any],
+    });
+  }
+
+  recentMessageCount++;
+
   let transactions: any[] = [];
   let aiTokens = 0;
   let usedAI = false;
 
   // Stage 1 & 2: Try Local first
   const localParsed = parseMessageLocal(userMessage, userId);
-  
-  // If local parsing found an amount AND a category, we can trust it
   const localSuccess = localParsed.type !== "unknown" && localParsed.amount > 0;
-  
-  // If local parsing is too simple or message looks complex (contains multiple numbers or long text)
   const isComplex = (userMessage.match(/\d+/g) || []).length > 1 || userMessage.length > 50;
 
   if (!localSuccess && (isComplex || localParsed.type === "unknown")) {
     // Stage 3: AI Inference
-    const aiResult = await parseWithAI(userMessage, userId);
-    transactions = aiResult.transactions;
-    aiTokens = aiResult.usage;
-    usedAI = true;
+    
+    // Decision: Batch or Real-time?
+    // Use Batch if: 
+    // 1. Traffic is high (more than 5 messages per minute globally)
+    // 2. User is in "Throttling" zone (> 30 messages today)
+    const useBatch = recentMessageCount > 5 || dailyCount.count >= 30;
+
+    if (useBatch) {
+      db.prepare(`
+        INSERT INTO pending_messages (userId, replyToken, text)
+        VALUES (?, ?, ?)
+      `).run(userId, event.replyToken, userMessage);
+      
+      if (dailyCount.count >= 30) {
+        // Notify user about throttling
+        return client.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{ type: "text", text: "คุณใช้งานเกิน 30 รายการ ระบบกำลังประมวลผลแบบคิว อาจจะล่าช้าเล็กน้อยครับ (จำกัด 50 รายการต่อวัน)" } as any],
+        });
+      }
+      return Promise.resolve(null);
+    } else {
+      // Real-time AI Inference
+      const aiResult = await parseWithAI(userMessage, userId);
+      transactions = aiResult.transactions;
+      aiTokens = aiResult.usage;
+      usedAI = true;
+    }
   } else {
     transactions = [localParsed];
   }
