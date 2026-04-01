@@ -106,11 +106,12 @@ async function parseWithAI(text: string, userId: string) {
   รายชื่อวัวของผู้ใช้คนนี้: ${cowList}
   
   กฎการทำงาน:
-  1. แยกข้อความออกเป็นรายการย่อยๆ (ถ้ามีหลายรายการ)
+  1. แยกข้อความออกเป็นรายการย่อยๆ (ถ้ามีหลายรายการในข้อความเดียว)
   2. ระบุประเภท (income/expense), หมวดหมู่ (label), จำนวนเงิน (amount), ชื่อวัว (cowName), และบันทึก (note)
-  3. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
-  4. ตอบกลับเป็น JSON Array เท่านั้น ตามโครงสร้างนี้:
-  [{"type": "income/expense", "category": "ชื่อหมวดหมู่", "amount": 100, "cowName": "ชื่อวัว", "note": "ข้อความต้นฉบับ"}]`;
+  3. **สำคัญ**: ในช่อง "note" ให้ระบุรายละเอียดสั้นๆ ของรายการนั้น (เช่น "ค่าหมา", "ขายวัว", "ขายมะนาว") ห้ามใส่ข้อความยาวๆ ทั้งหมด
+  4. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
+  5. ตอบกลับเป็น JSON Array เท่านั้น ตามโครงสร้างนี้:
+  [{"type": "income/expense", "category": "ชื่อหมวดหมู่", "amount": 100, "cowName": "ชื่อวัว", "note": "รายละเอียดสั้นๆ"}]`;
 
   try {
     const result = await ai.models.generateContent({
@@ -181,8 +182,10 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
   กฎการทำงาน:
   1. คุณจะได้รับรายการข้อความจากผู้ใช้หลายคน
   2. สำหรับแต่ละข้อความ ให้ระบุประเภท (income/expense), หมวดหมู่ (label), จำนวนเงิน (amount), ชื่อวัว (cowName), และบันทึก (note)
-  3. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
-  4. ตอบกลับเป็น JSON Array ของออบเจกต์ โดยแต่ละออบเจกต์ต้องมี "originalId" (จาก input) และ "transactions" (Array ของรายการที่ตีความได้)
+  3. **สำคัญมาก**: หากหนึ่งข้อความมีหลายรายการ (เช่น "ขายวัว 50000 ซื้ออาหาร 2000") ให้แยกออกเป็นหลายออบเจกต์ใน Array "transactions"
+  4. **สำคัญ**: ในช่อง "note" ให้ระบุรายละเอียดสั้นๆ ของรายการนั้น (เช่น "ค่าหมา", "ขายวัว", "ขายมะนาว") ห้ามใส่ข้อความยาวๆ ทั้งหมด
+  5. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
+  6. ตอบกลับเป็น JSON Array ของออบเจกต์ โดยแต่ละออบเจกต์ต้องมี "originalId" (จาก input) และ "transactions" (Array ของรายการที่ตีความได้)
   
   โครงสร้างคำตอบ:
   [{"originalId": 1, "userId": "user1", "transactions": [{"type": "income", "category": "ขายวัว", "amount": 50000, "cowName": "แดง", "note": "ขายวัวแดง"}]}]`;
@@ -586,13 +589,11 @@ async function handleEvent(event: any) {
   const localSuccess = localParsed.type !== "unknown" && localParsed.amount > 0;
   const isComplex = (userMessage.match(/\d+/g) || []).length > 1 || userMessage.length > 50;
 
-  if (!localSuccess && (isComplex || localParsed.type === "unknown")) {
+  // CRITICAL FIX: If it's complex (multiple numbers) or local parsing failed, use AI.
+  if (isComplex || !localSuccess) {
     // Stage 3: AI Inference
     
     // Decision: Batch or Real-time?
-    // Use Batch if: 
-    // 1. Traffic is high (more than 5 messages per minute globally)
-    // 2. User is in "Throttling" zone (> 30 messages today)
     const useBatch = recentMessageCount > 5 || dailyCount.count >= 30;
 
     if (useBatch) {
@@ -602,10 +603,9 @@ async function handleEvent(event: any) {
       `).run(userId, event.replyToken, userMessage);
       
       if (dailyCount.count >= 30) {
-        // Notify user about throttling
         return client.replyMessage({
           replyToken: event.replyToken,
-          messages: [{ type: "text", text: "คุณใช้งานเกิน 30 รายการ ระบบกำลังประมวลผลแบบคิว อาจจะล่าช้าเล็กน้อยครับ (จำกัด 50 รายการต่อวัน)" } as any],
+          messages: [{ type: "text", text: "คุณใช้งานเกิน 30 รายการ ระบบกำลังประมวลผลแบบคิวเพื่อประหยัดพลังงาน อาจจะล่าช้าเล็กน้อยครับ (จำกัด 50 รายการต่อวัน)" } as any],
         });
       }
       return Promise.resolve(null);

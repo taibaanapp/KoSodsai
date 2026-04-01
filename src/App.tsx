@@ -58,6 +58,7 @@ export default function App() {
   const [newNote, setNewNote] = useState({ title: '', content: '' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchData = async (userId: string) => {
     try {
@@ -333,27 +334,91 @@ export default function App() {
 
               {activeTab === 'transactions' && (
                 <div className="space-y-4">
-                  <h3 className="text-sm font-black flex items-center gap-2"><ListOrdered size={18} className="text-orange-500" /> ประวัติรายการ</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-black flex items-center gap-2"><ListOrdered size={18} className="text-orange-500" /> ประวัติรายการ</h3>
+                    <div className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-lg uppercase tracking-widest">
+                      {transactions.length} รายการ
+                    </div>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <input 
+                      type="text" 
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="ค้นหาหมวดหมู่ หรือ บันทึก (เช่น ค่ามะนาว)..."
+                      className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none transition-all"
+                    />
+                    {searchTerm && (
+                      <button 
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filtered Summary */}
+                  {searchTerm && (
+                    <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 animate-in fade-in slide-in-from-top-2 duration-200">
+                      <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-2">สรุปผลการค้นหา: "{searchTerm}"</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-[8px] font-bold text-gray-400 uppercase">รายรับ</p>
+                          <p className="text-sm font-black text-green-600">
+                            ฿{transactions
+                              .filter(t => (t.category.includes(searchTerm) || t.note.includes(searchTerm)) && t.type === 'income')
+                              .reduce((sum, t) => sum + t.amount, 0)
+                              .toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[8px] font-bold text-gray-400 uppercase">รายจ่าย</p>
+                          <p className="text-sm font-black text-red-600">
+                            ฿{transactions
+                              .filter(t => (t.category.includes(searchTerm) || t.note.includes(searchTerm)) && t.type === 'expense')
+                              .reduce((sum, t) => sum + t.amount, 0)
+                              .toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-2 pr-1">
                     {transactions.length === 0 ? <p className="text-center text-gray-400 text-xs py-8">ยังไม่มีรายการบันทึก</p> : 
-                      transactions.map(t => (
-                        <div key={t.id} className="p-3 bg-gray-50 rounded-2xl border border-gray-100 flex justify-between items-center">
+                      transactions
+                        .filter(t => 
+                          searchTerm === '' || 
+                          t.category.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          t.note.toLowerCase().includes(searchTerm.toLowerCase())
+                        )
+                        .map(t => (
+                        <div key={t.id} className="p-3 bg-gray-50 rounded-2xl border border-gray-100 flex justify-between items-center group hover:bg-white hover:shadow-md transition-all">
                           <div onClick={() => setEditingTransaction(t)} className="flex-1 cursor-pointer">
                             <div className="flex items-center gap-2">
                               <span className={`w-2 h-2 rounded-full ${t.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></span>
                               <p className="text-sm font-bold text-gray-800">{t.category}</p>
                             </div>
-                            <p className="text-[10px] text-gray-400 font-medium">{t.cowName} • {new Date(t.date).toLocaleDateString('th-TH')}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-[10px] text-gray-400 font-medium">{t.cowName} • {new Date(t.date).toLocaleDateString('th-TH')}</p>
+                              {t.note && <span className="text-[10px] text-orange-500 font-bold bg-orange-50 px-1.5 rounded"># {t.note}</span>}
+                            </div>
                           </div>
                           <div className="text-right flex items-center gap-3">
                             <p className={`text-sm font-black ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                               {t.type === 'income' ? '+' : '-'}฿{t.amount.toLocaleString()}
                             </p>
-                            <button onClick={() => handleDeleteTransaction(t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                            <button onClick={() => handleDeleteTransaction(t.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
                           </div>
                         </div>
                       ))
                     }
+                    {searchTerm && transactions.filter(t => t.category.toLowerCase().includes(searchTerm.toLowerCase()) || t.note.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+                      <p className="text-center text-gray-400 text-xs py-8">ไม่พบรายการที่ค้นหา</p>
+                    )}
                   </div>
                 </div>
               )}
