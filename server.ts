@@ -97,23 +97,53 @@ setInterval(() => {
   recentMessageCount = 0; // Reset every minute
 }, 60000);
 
+function cleanJson(text: string) {
+  try {
+    // Remove markdown code blocks if present
+    const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.error("JSON Parse Error. Raw text:", text);
+    // Try to find anything that looks like a JSON array or object
+    const match = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (innerErr) {
+        console.error("Fallback JSON Parse Error:", innerErr);
+      }
+    }
+    throw err;
+  }
+}
+
 async function parseWithAI(text: string, userId: string) {
   const userCows = db.prepare("SELECT name FROM cows WHERE userId = ?").all(userId) as { name: string }[];
   const cowList = userCows.map(c => c.name).join(", ") || "ไม่มีข้อมูล (ให้ใช้ 'โดยรวม')";
   
-  const systemInstruction = `คุณคือผู้ช่วยจัดการฟาร์มวัว หน้าที่ของคุณคือตีความข้อความรายรับ-รายจ่าย
+  const systemInstruction = `คุณคือ "โคสดใส" ผู้ช่วยจัดการฟาร์มวัวที่ฉลาดและเป็นกันเอง
+  หน้าที่ของคุณคือ:
+  1. ตีความข้อความรายรับ-รายจ่ายของฟาร์ม (แยกรายการได้หากมีหลายรายการ)
+  2. พูดคุยทักทาย หรือตอบคำถามทั่วไปเกี่ยวกับฟาร์ม
+  
   ข้อมูลหมวดหมู่ที่มี: ${JSON.stringify(masterData.categories)}
   รายชื่อวัวของผู้ใช้คนนี้: ${cowList}
   
   กฎการทำงาน:
-  1. แยกข้อความออกเป็นรายการย่อยๆ (ถ้ามีหลายรายการในข้อความเดียว)
-  2. ระบุประเภท (income/expense), หมวดหมู่ (label), จำนวนเงิน (amount), ชื่อวัว (cowName), และบันทึก (note)
-  3. **สำคัญ**: ในช่อง "note" ให้ระบุรายละเอียดสั้นๆ ของรายการนั้น (เช่น "ค่าหมา", "ขายวัว", "ขายมะนาว") ห้ามใส่ข้อความยาวๆ ทั้งหมด
-  4. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
-  5. ตอบกลับเป็น JSON Array เท่านั้น ตามโครงสร้างนี้:
-  [{"type": "income/expense", "category": "ชื่อหมวดหมู่", "amount": 100, "cowName": "ชื่อวัว", "note": "รายละเอียดสั้นๆ"}]`;
+  - หากเป็นรายการเงิน: ระบุประเภท (income/expense), หมวดหมู่ (label), จำนวนเงิน (amount), ชื่อวัว (cowName), และบันทึก (note)
+  - ในช่อง "note" ให้สรุปสั้นๆ ว่าเป็นค่าอะไร (เช่น "ค่ามะนาว", "ขายขี้วัว")
+  - หากเป็นคำทักทายหรือคำพูดทั่วไป: ให้ตอบกลับในช่อง "reply" อย่างสุภาพและเป็นกันเอง
+  - หากข้อความคลุมเครือหรือไม่ชัดเจน: ให้ถามกลับหรือแนะนำวิธีพิมพ์ในช่อง "reply"
+  - **สำคัญ**: หากไม่มีรายการเงิน ให้ส่ง "transactions" เป็น Array ว่าง [] และต้องมี "reply" เสมอ
+  
+  ตอบกลับเป็น JSON Object เท่านั้น:
+  {
+    "transactions": [{"type": "income/expense", "category": "ชื่อหมวดหมู่", "amount": 100, "cowName": "ชื่อวัว", "note": "สรุปสั้นๆ"}],
+    "reply": "ข้อความตอบกลับผู้ใช้"
+  }`;
 
   try {
+    console.log(`AI Parsing (Real-time) for user ${userId}: "${text}"`);
     const result = await ai.models.generateContent({
       model: model,
       contents: [{ parts: [{ text }] }],
@@ -123,8 +153,12 @@ async function parseWithAI(text: string, userId: string) {
       },
     });
 
-    const transactions = JSON.parse(result.text || "[]");
+    const aiResponse = cleanJson(result.text || "{}");
+    const transactions = aiResponse.transactions || [];
+    const reply = aiResponse.reply || "";
     const usage = result.usageMetadata;
+
+    console.log(`AI Result: ${transactions.length} trans, reply: "${reply}"`);
 
     if (usage) {
       db.prepare(`
@@ -133,10 +167,10 @@ async function parseWithAI(text: string, userId: string) {
       `).run(userId, usage.promptTokenCount, usage.candidatesTokenCount, usage.totalTokenCount);
     }
 
-    return { transactions, usage: usage?.totalTokenCount || 0 };
+    return { transactions, reply, usage: usage?.totalTokenCount || 0 };
   } catch (err) {
     console.error("AI Parsing Error:", err);
-    return { transactions: [], usage: 0 };
+    return { transactions: [], reply: "ขออภัยครับ ระบบประมวลผลขัดข้องชั่วคราว รบกวนลองใหม่อีกครั้งครับ", usage: 0 };
   }
 }
 
@@ -176,23 +210,24 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
     userContexts[uid] = userCows.map(c => c.name).join(", ") || "ไม่มีข้อมูล (ให้ใช้ 'โดยรวม')";
   }
 
-  const systemInstruction = `คุณคือผู้ช่วยจัดการฟาร์มวัว หน้าที่ของคุณคือตีความข้อความรายรับ-รายจ่าย
+  const systemInstruction = `คุณคือ "โคสดใส" ผู้ช่วยจัดการฟาร์มวัว
+  หน้าที่ของคุณคือตีความข้อความรายรับ-รายจ่าย หรือพูดคุยทั่วไป
+  
   ข้อมูลหมวดหมู่ที่มี: ${JSON.stringify(masterData.categories)}
   
   กฎการทำงาน:
   1. คุณจะได้รับรายการข้อความจากผู้ใช้หลายคน
-  2. สำหรับแต่ละข้อความ ให้ระบุประเภท (income/expense), หมวดหมู่ (label), จำนวนเงิน (amount), ชื่อวัว (cowName), และบันทึก (note)
-  3. **สำคัญมาก**: หากหนึ่งข้อความมีหลายรายการ (เช่น "ขายวัว 50000 ซื้ออาหาร 2000") ให้แยกออกเป็นหลายออบเจกต์ใน Array "transactions"
-  4. **สำคัญ**: ในช่อง "note" ให้ระบุรายละเอียดสั้นๆ ของรายการนั้น (เช่น "ค่าหมา", "ขายวัว", "ขายมะนาว") ห้ามใส่ข้อความยาวๆ ทั้งหมด
-  5. ถ้าไม่ระบุชื่อวัว ให้ใช้ "โดยรวม"
-  6. ตอบกลับเป็น JSON Array ของออบเจกต์ โดยแต่ละออบเจกต์ต้องมี "originalId" (จาก input) และ "transactions" (Array ของรายการที่ตีความได้)
+  2. สำหรับแต่ละข้อความ ให้ระบุรายการเงิน (transactions) หรือข้อความตอบกลับ (reply)
+  3. หากเป็นรายการเงิน: ระบุประเภท, หมวดหมู่, จำนวนเงิน, ชื่อวัว, และบันทึกสั้นๆ
+  4. หากเป็นคำทักทายหรือคุยทั่วไป: ใส่ข้อความตอบกลับในช่อง "reply"
   
-  โครงสร้างคำตอบ:
-  [{"originalId": 1, "userId": "user1", "transactions": [{"type": "income", "category": "ขายวัว", "amount": 50000, "cowName": "แดง", "note": "ขายวัวแดง"}]}]`;
+  ตอบกลับเป็น JSON Array ของออบเจกต์:
+  [{"originalId": 1, "userId": "user1", "transactions": [...], "reply": "สวัสดีครับ"}]`;
 
   const prompt = messages.map(m => `ID: ${m.id}, User: ${m.userId}, Cows: ${userContexts[m.userId]}, Text: "${m.text}"`).join("\n");
 
   try {
+    console.log(`Processing batch of ${messages.length} messages...`);
     const result = await ai.models.generateContent({
       model: model,
       contents: [{ parts: [{ text: prompt }] }],
@@ -202,11 +237,10 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
       },
     });
 
-    const batchResults = JSON.parse(result.text || "[]");
+    const batchResults = cleanJson(result.text || "[]");
     const usage = result.usageMetadata;
 
     if (usage) {
-      // Log usage for the admin (or split among users, but for batching we'll log it as a system entry)
       db.prepare(`
         INSERT INTO ai_usage (userId, tokensPrompt, tokensResponse, tokensTotal)
         VALUES (?, ?, ?, ?)
@@ -218,7 +252,8 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
       if (!original) continue;
 
       const savedIds: number[] = [];
-      for (const t of res.transactions) {
+      const transactions = res.transactions || [];
+      for (const t of transactions) {
         try {
           const insertResult = db.prepare(`
             INSERT INTO transactions (userId, type, category, amount, note, cowName, rawText)
@@ -231,8 +266,8 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
       }
 
       // Reply to user
-      if (res.transactions.length > 0) {
-        const summary = res.transactions.map((t: any, i: number) => {
+      if (transactions.length > 0) {
+        const summary = transactions.map((t: any, i: number) => {
           const typeLabel = t.type === "income" ? "🟢 รับ" : "🔴 จ่าย";
           return `${i + 1}. ${t.category} (${t.cowName}): ${typeLabel} ฿${t.amount.toLocaleString()}`;
         }).join("\n");
@@ -247,7 +282,7 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
           summary, 
           editUrl, 
           true, 
-          Math.round((usage?.totalTokenCount || 0) / messages.length), // Estimated per message
+          Math.round((usage?.totalTokenCount || 0) / messages.length),
           savedIds.length === 1
         );
 
@@ -255,6 +290,11 @@ async function parseBatchWithAI(messages: { id: number, text: string, userId: st
           replyToken: original.replyToken,
           messages: [flexMessage as any],
         }).catch(err => console.error("Error replying to batch message", err));
+      } else if (res.reply) {
+        client.replyMessage({
+          replyToken: original.replyToken,
+          messages: [{ type: "text", text: res.reply } as any],
+        }).catch(err => console.error("Error replying to batch message (reply)", err));
       } else {
         client.replyMessage({
           replyToken: original.replyToken,
@@ -583,6 +623,7 @@ async function handleEvent(event: any) {
   let transactions: any[] = [];
   let aiTokens = 0;
   let usedAI = false;
+  let aiReply = "";
 
   // Stage 1 & 2: Try Local first
   const localParsed = parseMessageLocal(userMessage, userId);
@@ -613,6 +654,7 @@ async function handleEvent(event: any) {
       // Real-time AI Inference
       const aiResult = await parseWithAI(userMessage, userId);
       transactions = aiResult.transactions;
+      aiReply = aiResult.reply;
       aiTokens = aiResult.usage;
       usedAI = true;
     }
@@ -652,7 +694,7 @@ async function handleEvent(event: any) {
   if (transactions.length === 0) {
     return client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: "text", text: "ขออภัยครับ ผมไม่เข้าใจรายการนี้ รบกวนระบุรายละเอียดอีกครั้งครับ" } as any],
+      messages: [{ type: "text", text: aiReply || "ขออภัยครับ ผมไม่เข้าใจรายการนี้ รบกวนระบุรายละเอียดอีกครั้งครับ" } as any],
     });
   }
 
