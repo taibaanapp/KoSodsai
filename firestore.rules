@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (from LINE)
+    // Fields:
+    //   - displayName: string (required, 1-100 chars)
+    //   - pictureUrl: string (optional, URL)
+    //   - email: string (optional, email format)
+    //   - updatedAt: timestamp (required)
+    //
+    // Collection: cattle
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, owner UID)
+    //   - name: string (required, 1-100 chars)
+    //   - breed: string (required, 1-100 chars)
+    //   - birthDate: string (required, YYYY-MM-DD format)
+    //   - gender: string (required, 'male' or 'female')
+    //   - status: string (required, 'active', 'sold', 'deceased')
+    //   - notes: string (optional, 0-1000 chars)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: transactions
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required, owner UID)
+    //   - type: string (required, 'income' or 'expense')
+    //   - category: string (required, 1-100 chars)
+    //   - amount: number (required, positive)
+    //   - date: string (required, YYYY-MM-DD format)
+    //   - description: string (optional, 0-1000 chars)
+    //   - cattleId: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "akkaluck@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['displayName', 'updatedAt']) &&
+             hasOnlyAllowedFields(['displayName', 'pictureUrl', 'email', 'updatedAt', 'role']) &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100 &&
+             (!('pictureUrl' in data) || isValidUrl(data.pictureUrl)) &&
+             (!('email' in data) || isValidEmail(data.email)) &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidCattle(data) {
+      return hasRequiredFields(['userId', 'name', 'breed', 'birthDate', 'gender', 'status', 'createdAt']) &&
+             hasOnlyAllowedFields(['userId', 'name', 'breed', 'birthDate', 'gender', 'status', 'notes', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.breed is string && data.breed.size() > 0 && data.breed.size() <= 100 &&
+             isValidDateString(data.birthDate) &&
+             data.gender in ['male', 'female'] &&
+             data.status in ['active', 'sold', 'deceased'] &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return hasRequiredFields(['userId', 'type', 'category', 'amount', 'date', 'createdAt']) &&
+             hasOnlyAllowedFields(['userId', 'type', 'category', 'amount', 'date', 'description', 'cattleId', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.type in ['income', 'expense'] &&
+             data.category is string && data.category.size() > 0 && data.category.size() <= 100 &&
+             data.amount is number && data.amount >= 0 &&
+             isValidDateString(data.date) &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             (!('cattleId' in data) || data.cattleId is string) &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (!('role' in request.resource.data) || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /cattle/{cattleId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidCattle(request.resource.data);
+      allow update: if isDocOwner() && isValidCattle(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isDocOwner() && isValidTransaction(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isDocOwner() || isAdmin();
+    }
+  }
+}

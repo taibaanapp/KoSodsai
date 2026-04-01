@@ -1,0 +1,9 @@
+{
+  "name": "KoSodsai (โคสดใส)",
+  "description": "แอปพลิเคชันจัดการฟาร์มวัว บันทึกรายรับรายจ่าย การผสมพันธุ์ และสรุปผลผ่าน LINE LIFF",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
